@@ -20,6 +20,7 @@ import { ProductDetailsModal } from './components/ProductDetailsModal';
 import { WhatsAppIcon } from './components/WhatsAppIcon';
 import { AdminPage } from './pages/AdminPage';
 import { useAuth } from './context/AuthContext';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 
 const OWNER_EMAIL = 'beingmagrajwork@gmail.com';
 
@@ -493,6 +494,9 @@ export default function App() {
         onClose={() => setIsAuthModalOpen(false)}
         initialMode={authModalMode}
       />
+
+      {/* Vercel Speed Insights */}
+      <SpeedInsights />
     </div>
   );
 }
