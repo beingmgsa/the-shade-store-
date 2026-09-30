@@ -52,10 +52,10 @@ export interface GlassesProduct {
 }
 
 const PRESET_STUDIO_IMAGES = [
-  { label: 'Amber Tortoise Acetate', url: '/src/assets/images/glasses_tortoise_acetate_1790681743897.jpg' },
-  { label: 'Matte Black Square', url: '/src/assets/images/glasses_matte_black_square_1790681762010.jpg' },
-  { label: 'Brushed Gold Hexagonal', url: '/src/assets/images/glasses_gold_geometric_1790681777666.jpg' },
-  { label: 'Minimalist Titanium Round', url: '/src/assets/images/glasses_minimalist_titanium_1790681791906.jpg' },
+  { label: 'Amber Tortoise Acetate', url: '/images/glasses_tortoise_acetate_1790681743897.jpg' },
+  { label: 'Matte Black Square', url: '/images/glasses_matte_black_square_1790681762010.jpg' },
+  { label: 'Brushed Gold Hexagonal', url: '/images/glasses_gold_geometric_1790681777666.jpg' },
+  { label: 'Minimalist Titanium Round', url: '/images/glasses_minimalist_titanium_1790681791906.jpg' },
 ];
 
 export interface AdminPageProps {
@@ -179,7 +179,11 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
         throw new Error(uploadData.error?.message || 'Cloudinary upload failed');
       }
 
-      showToast('Photo uploaded to Cloudinary successfully!');
+      if (!uploadData.secure_url || typeof uploadData.secure_url !== 'string' || !uploadData.secure_url.startsWith('http')) {
+        throw new Error('Cloudinary response did not return a valid permanent image URL');
+      }
+
+      showToast('Photo uploaded to Cloudinary CDN successfully!');
       return uploadData.secure_url;
     } catch (err: any) {
       showToast(err.message || 'Image upload failed', 'error');
@@ -190,10 +194,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
     }
   };
 
-  // Fetch products
+  // Fetch products without stale cache
   const fetchProducts = async () => {
     try {
-      const res = await fetch('/api/products');
+      const res = await fetch(`/api/products?t=${Date.now()}`, {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache',
+          Pragma: 'no-cache',
+        },
+      });
       if (res.ok) {
         const data = await res.json();
         setProducts(data);
@@ -334,7 +344,17 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
       return;
     }
 
+    if (isUploadingImage) {
+      showToast('Please wait for the photo to finish uploading to Cloudinary before saving.', 'error');
+      return;
+    }
+
     const imageToUse = formCustomImage.trim() || formImage;
+
+    if (imageToUse.startsWith('blob:')) {
+      showToast('Temporary browser blob cannot be saved to the database. Please wait for Cloudinary upload to complete.', 'error');
+      return;
+    }
 
     setIsSubmitting(true);
     try {
@@ -354,10 +374,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
 
       if (!res.ok) {
         const data = await res.json();
-        showToast(data.error || 'Failed to add product', 'error');
+        showToast(data.error || 'Failed to add product to database', 'error');
       } else {
         const created = await res.json();
-        setProducts([created, ...products]);
+        // Invalidate and refresh products list from server
+        await fetchProducts();
+        window.dispatchEvent(new CustomEvent('the-shade-store:products-updated'));
+
         // Reset form
         setFormName('');
         setFormPrice('');
@@ -366,7 +389,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
         setFormDescription('');
         setFormAvailable(true);
         setActiveTab('catalog');
-        showToast(`"${created.name}" added to catalog successfully!`);
+        showToast(`"${created.name}" published with photo!`);
       }
     } catch {
       showToast('Error connecting to server', 'error');
@@ -379,6 +402,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
   const handleUpdateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser || !isOwner || !editingProduct) return;
+
+    if (isUploadingImage) {
+      showToast('Please wait for photo upload to finish before saving changes.', 'error');
+      return;
+    }
+
+    if (editingProduct.image && editingProduct.image.startsWith('blob:')) {
+      showToast('Temporary browser blob cannot be saved. Please wait for Cloudinary upload to complete.', 'error');
+      return;
+    }
 
     setIsSubmitting(true);
     try {
@@ -398,12 +431,15 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
 
       if (!res.ok) {
         const data = await res.json();
-        showToast(data.error || 'Failed to update product', 'error');
+        showToast(data.error || 'Failed to update product in database', 'error');
       } else {
         const updated = await res.json();
-        setProducts(products.map((p) => (p.id === updated.id ? updated : p)));
+        // Invalidate and refresh products list from server
+        await fetchProducts();
+        window.dispatchEvent(new CustomEvent('the-shade-store:products-updated'));
+
         setEditingProduct(null);
-        showToast(`"${updated.name}" updated successfully!`);
+        showToast(`"${updated.name}" updated successfully! Latest image saved.`);
       }
     } catch {
       showToast('Error updating product', 'error');
@@ -430,13 +466,15 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
 
       if (!res.ok) {
         // Rollback
-        setProducts(products.map((p) => (p.id === product.id ? { ...p, available: product.available } : p)));
+        await fetchProducts();
         showToast('Failed to update availability status', 'error');
       } else {
+        await fetchProducts();
+        window.dispatchEvent(new CustomEvent('the-shade-store:products-updated'));
         showToast(`Marked "${product.name}" as ${newStatus ? 'Available' : 'Out of Stock'}`);
       }
     } catch {
-      setProducts(products.map((p) => (p.id === product.id ? { ...p, available: product.available } : p)));
+      await fetchProducts();
       showToast('Network error updating status', 'error');
     }
   };
@@ -456,7 +494,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
       if (!res.ok) {
         showToast('Failed to delete product', 'error');
       } else {
-        setProducts(products.filter((p) => p.id !== deleteConfirmProduct.id));
+        await fetchProducts();
+        window.dispatchEvent(new CustomEvent('the-shade-store:products-updated'));
         showToast(`"${deleteConfirmProduct.name}" permanently deleted`);
         setDeleteConfirmProduct(null);
       }
@@ -1123,15 +1162,25 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
               <div className="pt-4 flex items-center gap-3">
                 <button
                   type="submit"
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || isUploadingImage}
                   className="flex-1 min-h-[44px] bg-neutral-950 hover:bg-neutral-800 text-white rounded-xl text-sm font-semibold flex items-center justify-center gap-2 shadow-xs transition-colors cursor-pointer disabled:opacity-50"
                 >
-                  {isSubmitting ? (
-                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  {isUploadingImage ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin text-emerald-400" />
+                      <span>Uploading Photo to Cloudinary...</span>
+                    </>
+                  ) : isSubmitting ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Publishing to Database...</span>
+                    </>
                   ) : (
-                    <Plus className="w-4 h-4" />
+                    <>
+                      <Plus className="w-4 h-4" />
+                      <span>Publish Frame to Public Catalog</span>
+                    </>
                   )}
-                  <span>Publish Frame to Public Catalog</span>
                 </button>
 
                 <button
@@ -1462,10 +1511,22 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
                 </button>
                 <button
                   type="submit"
-                  disabled={isSubmitting}
-                  className="px-4 py-2 bg-neutral-950 hover:bg-neutral-800 text-white rounded-lg text-xs font-semibold shadow-xs"
+                  disabled={isSubmitting || isUploadingImage}
+                  className="px-4 py-2 bg-neutral-950 hover:bg-neutral-800 text-white rounded-lg text-xs font-semibold shadow-xs disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
                 >
-                  Save Changes
+                  {isUploadingImage ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+                      <span>Uploading Photo...</span>
+                    </>
+                  ) : isSubmitting ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Saving Changes...</span>
+                    </>
+                  ) : (
+                    <span>Save Changes</span>
+                  )}
                 </button>
               </div>
             </form>

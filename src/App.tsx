@@ -48,9 +48,15 @@ export default function App() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
-  // Fetch live products from backend API (with fallback to initial catalog)
-  useEffect(() => {
-    fetch('/api/products')
+  // Fetch live products from backend API (with cache busting and fallback)
+  const fetchLiveProducts = () => {
+    fetch(`/api/products?t=${Date.now()}`, {
+      cache: 'no-store',
+      headers: {
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
+      },
+    })
       .then((res) => {
         if (res.ok) return res.json();
         throw new Error('Failed to load from API');
@@ -65,7 +71,26 @@ export default function App() {
       .catch(() => {
         // Fallback to static GLASSES_CATALOG
       });
+  };
+
+  useEffect(() => {
+    fetchLiveProducts();
+
+    // Listen to real-time update events when admin modifies frames
+    const handleUpdateEvent = () => {
+      fetchLiveProducts();
+    };
+
+    window.addEventListener('the-shade-store:products-updated', handleUpdateEvent);
+    return () => window.removeEventListener('the-shade-store:products-updated', handleUpdateEvent);
   }, []);
+
+  // When switching from Admin back to Store, refresh immediately
+  useEffect(() => {
+    if (!isAdminRoute) {
+      fetchLiveProducts();
+    }
+  }, [isAdminRoute]);
 
   // Render Admin Portal if visiting /admin
   if (isAdminRoute) {
