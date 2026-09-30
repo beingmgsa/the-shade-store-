@@ -1,0 +1,38 @@
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { extractBearerToken, verifyFirebaseOwnerToken } from '../_lib/auth.js';
+import { getCloudinaryConfig } from '../_lib/cloudinary.js';
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    return res.status(204).end();
+  }
+
+  // Verify owner auth
+  const token = extractBearerToken(req.headers.authorization);
+  if (!token) {
+    return res.status(401).json({ error: 'Unauthorized: Firebase authentication token required' });
+  }
+
+  const authResult = verifyFirebaseOwnerToken(token);
+  if (!authResult.valid) {
+    return res.status(403).json({ error: authResult.error || 'Forbidden: Admin access denied' });
+  }
+
+  const { cloudName, apiKey, apiSecret, isConfigured } = getCloudinaryConfig();
+
+  return res.status(200).json({
+    configured: isConfigured,
+    cloudName: cloudName || null,
+    apiKey: apiKey || null,
+    missing: {
+      cloudName: !cloudName,
+      apiKey: !apiKey,
+      apiSecret: !apiSecret,
+    },
+  });
+}

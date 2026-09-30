@@ -183,12 +183,11 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
 
     try {
       const token = await currentUser.getIdToken();
-      const signRes = await fetch(`/api/admin/cloudinary-sign?t=${Date.now()}`, {
+      const signRes = await fetch('/api/admin/cloudinary-sign', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
-          'Cache-Control': 'no-cache',
         },
       });
 
