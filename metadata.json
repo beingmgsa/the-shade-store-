@@ -1,0 +1,7 @@
+{
+  "name": "The Shade Store",
+  "description": "Eyewear catalog and contact website for The Shade Store in Bhilwara, Rajasthan.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
