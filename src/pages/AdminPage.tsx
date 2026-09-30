@@ -23,7 +23,8 @@ import {
   Mail,
   Upload,
   CloudUpload,
-  Sparkles
+  Sparkles,
+  Copy
 } from 'lucide-react';
 import { 
   signInWithEmailAndPassword, 
@@ -78,7 +79,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
 
   // Products state
   const [products, setProducts] = useState<GlassesProduct[]>([]);
-  const [activeTab, setActiveTab] = useState<'catalog' | 'add' | 'preview' | 'setup'>('catalog');
+  const [activeTab, setActiveTab] = useState<'catalog' | 'add' | 'cloudinary' | 'preview' | 'setup'>('catalog');
 
   // Modal / Editing states
   const [editingProduct, setEditingProduct] = useState<GlassesProduct | null>(null);
@@ -92,6 +93,11 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
   const [cloudinaryMissing, setCloudinaryMissing] = useState<string[]>([]);
   const [isUploadingImage, setIsUploadingImage] = useState<boolean>(false);
   const [uploadProgress, setUploadProgress] = useState<string | null>(null);
+  const [showSecretInSetup, setShowSecretInSetup] = useState<boolean>(false);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [testUploadResult, setTestUploadResult] = useState<string | null>(null);
+  const [isTestingUpload, setIsTestingUpload] = useState<boolean>(false);
+  const [isCheckingStatus, setIsCheckingStatus] = useState<boolean>(false);
 
   // New product form
   const [formName, setFormName] = useState('');
@@ -105,6 +111,17 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setNotification({ type, message });
     setTimeout(() => setNotification(null), 5000);
+  };
+
+  const copyText = (text: string, label: string) => {
+    try {
+      navigator.clipboard.writeText(text);
+      setCopiedField(label);
+      showToast(`Copied ${label} to clipboard!`);
+      setTimeout(() => setCopiedField(null), 2500);
+    } catch {
+      showToast(`Failed to copy ${label}`, 'error');
+    }
   };
 
   // Safe response parser that never throws cryptic JSON SyntaxErrors on HTML/text responses
@@ -841,6 +858,23 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
           </button>
 
           <button
+            onClick={() => setActiveTab('cloudinary')}
+            className={`min-h-[38px] px-3 py-1.5 text-xs font-medium rounded-lg whitespace-nowrap transition-colors cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'cloudinary' 
+                ? 'bg-neutral-950 text-white font-semibold' 
+                : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100'
+            }`}
+          >
+            <CloudUpload className="w-3.5 h-3.5" />
+            <span>Cloudinary Setup</span>
+            {cloudinaryConfigured ? (
+              <span className="w-2 h-2 rounded-full bg-emerald-400" title="Connected to Cloudinary"></span>
+            ) : (
+              <span className="w-2 h-2 rounded-full bg-amber-400" title="Setup Needed"></span>
+            )}
+          </button>
+
+          <button
             onClick={() => setActiveTab('preview')}
             className={`min-h-[38px] px-3 py-1.5 text-xs font-medium rounded-lg whitespace-nowrap transition-colors cursor-pointer flex items-center gap-1.5 ${
               activeTab === 'preview' 
@@ -1300,19 +1334,363 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
           </div>
         )}
 
-        {/* ================= TAB 4: FIREBASE SECURITY & SETUP INFO ================= */}
-        {activeTab === 'setup' && (
+        {/* ================= TAB: CLOUDINARY SETUP ================= */}
+        {activeTab === 'cloudinary' && (
           <div className="max-w-3xl mx-auto space-y-6">
-            <div className="bg-white rounded-2xl border border-neutral-200 p-6 sm:p-8">
+            {/* Header */}
+            <div className="bg-white rounded-2xl border border-neutral-200/90 shadow-xs p-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-neutral-100">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-xl bg-neutral-900 text-white flex items-center justify-center shadow-xs shrink-0">
+                    <CloudUpload className="w-6 h-6 text-emerald-400" />
+                  </div>
+                  <div>
+                    <h1 className="font-serif text-2xl font-semibold text-neutral-950">
+                      Cloudinary Photo Setup
+                    </h1>
+                    <p className="text-xs text-neutral-500 mt-0.5">
+                      Direct, secure signed photo uploads to Cloudinary CDN for The Shade Store
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={isCheckingStatus}
+                    onClick={async () => {
+                      setIsCheckingStatus(true);
+                      await checkCloudinaryStatus(currentUser);
+                      setIsCheckingStatus(false);
+                      showToast('Cloudinary connection status refreshed!');
+                    }}
+                    className="min-h-[36px] px-3.5 py-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isCheckingStatus ? 'animate-spin' : ''}`} />
+                    <span>{isCheckingStatus ? 'Checking...' : 'Check Connection'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Status Banner */}
+              <div className="mt-4">
+                {cloudinaryConfigured ? (
+                  <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 flex items-start gap-3">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                    <div className="text-xs text-emerald-950 flex-1">
+                      <div className="flex items-center gap-2 font-semibold text-sm text-emerald-900">
+                        <span>Status: Connected</span>
+                        <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-mono font-normal">
+                          cloud: {cloudinaryCloudName || 'tis87kjf'}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-emerald-800 leading-relaxed">
+                        Server-side signed upload verification at <code className="bg-emerald-100/70 px-1 py-0.5 rounded font-mono text-[11px]">POST /api/admin/cloudinary-sign</code> is active. Product photos chosen in the admin panel upload directly to your Cloudinary media library in folder <code className="bg-emerald-100/70 px-1 py-0.5 rounded font-mono text-[11px]">the_shade_store/products</code>.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 flex items-start gap-3">
+                    <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                    <div className="text-xs text-amber-950 flex-1">
+                      <div className="flex items-center gap-2 font-semibold text-sm text-amber-900">
+                        <span>Status: Setup Needed in Vercel</span>
+                        {cloudinaryMissing.length > 0 && (
+                          <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-mono font-normal">
+                            Missing: {cloudinaryMissing.join(', ')}
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-1 text-amber-800 leading-relaxed">
+                        The server needs your 3 Cloudinary environment variables in Vercel to sign photo uploads. Follow the instructions below to add them to your Vercel Project Settings.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Three Labeled Fields Card */}
+            <div className="bg-white rounded-2xl border border-neutral-200/90 shadow-xs p-6 space-y-5">
+              <div>
+                <h2 className="font-serif text-lg font-semibold text-neutral-950">
+                  Your Cloudinary Credentials
+                </h2>
+                <p className="text-xs text-neutral-500 mt-0.5">
+                  Use the copy buttons below to copy each credential into your Vercel Project Settings.
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                {/* Field 1: Cloud Name */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-semibold text-neutral-800 flex items-center gap-1.5">
+                      <span>Cloud name</span>
+                      <code className="text-[10px] font-mono text-neutral-500 bg-neutral-100 px-1 py-0.5 rounded">CLOUDINARY_CLOUD_NAME</code>
+                    </label>
+                    <span className="text-[10px] text-neutral-400">Your account identifier</span>
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value="tis87kjf"
+                      className="flex-1 px-3.5 py-2.5 bg-neutral-50 border border-neutral-200 rounded-xl text-xs sm:text-sm font-mono text-neutral-900 font-semibold focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => copyText('tis87kjf', 'CLOUDINARY_CLOUD_NAME')}
+                      className="px-3.5 py-2.5 bg-neutral-900 hover:bg-neutral-800 text-white rounded-xl text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+                    >
+                      {copiedField === 'CLOUDINARY_CLOUD_NAME' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedField === 'CLOUDINARY_CLOUD_NAME' ? 'Copied' : 'Copy'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Field 2: API Key */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-semibold text-neutral-800 flex items-center gap-1.5">
+                      <span>API Key</span>
+                      <code className="text-[10px] font-mono text-neutral-500 bg-neutral-100 px-1 py-0.5 rounded">CLOUDINARY_API_KEY</code>
+                    </label>
+                    <span className="text-[10px] text-neutral-400">Public API key for uploads</span>
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value="425216243798441"
+                      className="flex-1 px-3.5 py-2.5 bg-neutral-50 border border-neutral-200 rounded-xl text-xs sm:text-sm font-mono text-neutral-900 font-semibold focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => copyText('425216243798441', 'CLOUDINARY_API_KEY')}
+                      className="px-3.5 py-2.5 bg-neutral-900 hover:bg-neutral-800 text-white rounded-xl text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+                    >
+                      {copiedField === 'CLOUDINARY_API_KEY' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedField === 'CLOUDINARY_API_KEY' ? 'Copied' : 'Copy'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Field 3: API Secret */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-semibold text-neutral-800 flex items-center gap-1.5">
+                      <span>API Secret</span>
+                      <code className="text-[10px] font-mono text-neutral-500 bg-neutral-100 px-1 py-0.5 rounded">CLOUDINARY_API_SECRET</code>
+                    </label>
+                    <span className="text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded font-medium border border-amber-200">
+                      Server-side only (Secret)
+                    </span>
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <input
+                        type={showSecretInSetup ? 'text' : 'password'}
+                        readOnly
+                        value="Txp59TP7lxIfBxWYV550A91odbM"
+                        className="w-full px-3.5 py-2.5 bg-neutral-50 border border-neutral-200 rounded-xl text-xs sm:text-sm font-mono text-neutral-900 font-semibold focus:outline-none pr-10"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowSecretInSetup(!showSecretInSetup)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-700 cursor-pointer p-1"
+                        title={showSecretInSetup ? 'Hide secret' : 'Show secret'}
+                      >
+                        {showSecretInSetup ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => copyText('Txp59TP7lxIfBxWYV550A91odbM', 'CLOUDINARY_API_SECRET')}
+                      className="px-3.5 py-2.5 bg-neutral-900 hover:bg-neutral-800 text-white rounded-xl text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+                    >
+                      {copiedField === 'CLOUDINARY_API_SECRET' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedField === 'CLOUDINARY_API_SECRET' ? 'Copied' : 'Copy'}</span>
+                    </button>
+                  </div>
+                  <div className="mt-2 text-[11px] text-neutral-500 leading-relaxed bg-neutral-50 p-2.5 rounded-lg border border-neutral-200">
+                    🔒 <strong>Strict Server-Side Protection:</strong> This API secret is kept exclusively on your Vercel serverless functions in <code className="font-mono">api/admin/cloudinary-sign.ts</code>. It is never exposed in browser JavaScript, client network requests, or public Git repositories.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Test Upload Sandbox */}
+            <div className="bg-white rounded-2xl border border-neutral-200/90 shadow-xs p-6">
+              <div className="flex items-center justify-between pb-3 border-b border-neutral-100 mb-4">
+                <div>
+                  <h3 className="font-serif text-lg font-semibold text-neutral-950 flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-emerald-600" />
+                    <span>Test Cloudinary Upload</span>
+                  </h3>
+                  <p className="text-xs text-neutral-500 mt-0.5">
+                    Verify the real upload flow: choose an image to request a server signature and upload directly to Cloudinary CDN.
+                  </p>
+                </div>
+                <label className={`min-h-[36px] px-3.5 py-1.5 bg-neutral-950 hover:bg-neutral-850 text-white rounded-lg text-xs font-medium inline-flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors shrink-0 ${
+                  isTestingUpload || isUploadingImage ? 'opacity-50 pointer-events-none' : ''
+                }`}>
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>{isTestingUpload || isUploadingImage ? 'Uploading...' : 'Upload Test Photo'}</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    disabled={isTestingUpload || isUploadingImage}
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        setIsTestingUpload(true);
+                        setTestUploadResult(null);
+                        const url = await uploadToCloudinary(file);
+                        if (url) {
+                          setTestUploadResult(url);
+                        }
+                        setIsTestingUpload(false);
+                      }
+                    }}
+                  />
+                </label>
+              </div>
+
+              {testUploadResult ? (
+                <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-200 flex flex-col sm:flex-row items-center gap-4">
+                  <div className="w-20 h-20 rounded-xl overflow-hidden border border-emerald-300 shrink-0 bg-white shadow-2xs">
+                    <img src={testUploadResult} alt="Upload verification" className="w-full h-full object-cover" />
+                  </div>
+                  <div className="flex-1 min-w-0 text-left">
+                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded">
+                      <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Permanent Cloudinary CDN URL Verified
+                    </span>
+                    <p className="text-xs font-mono text-emerald-950 truncate mt-1 select-all bg-white p-2 rounded border border-emerald-200/80">
+                      {testUploadResult}
+                    </p>
+                    <div className="flex items-center gap-2 mt-2">
+                      <button
+                        type="button"
+                        onClick={() => copyText(testUploadResult, 'Photo URL')}
+                        className="text-[11px] text-emerald-800 font-medium hover:underline inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        <Copy className="w-3 h-3" /> Copy URL
+                      </button>
+                      <a
+                        href={testUploadResult}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[11px] text-emerald-800 font-medium hover:underline inline-flex items-center gap-1"
+                      >
+                        <ExternalLink className="w-3 h-3" /> Open in New Tab
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-6 text-xs text-neutral-400 border border-dashed border-neutral-200 rounded-xl bg-neutral-50/50">
+                  Click <strong>Upload Test Photo</strong> above to test your Cloudinary connection with a real image file.
+                </div>
+              )}
+            </div>
+
+            {/* Step-by-Step Vercel Configuration Guide */}
+            <div className="bg-white rounded-2xl border border-neutral-200/90 shadow-xs p-6 space-y-4">
+              <div>
+                <h3 className="font-serif text-lg font-semibold text-neutral-950 flex items-center gap-2">
+                  <Shield className="w-4 h-4 text-neutral-900" />
+                  <span>Step-by-Step Instructions for Vercel Deployment</span>
+                </h3>
+                <p className="text-xs text-neutral-500 mt-0.5">
+                  Follow these 5 steps to add your credentials in Vercel and redeploy:
+                </p>
+              </div>
+
+              <div className="space-y-3 text-xs text-neutral-700">
+                <div className="p-3.5 bg-neutral-50 rounded-xl border border-neutral-200/80 flex gap-3">
+                  <div className="w-6 h-6 rounded-full bg-neutral-900 text-white text-xs font-bold flex items-center justify-center shrink-0">
+                    1
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-neutral-950">Open Vercel Project Settings</h4>
+                    <p className="text-neutral-600 mt-0.5">
+                      Log in to your <strong>Vercel Dashboard</strong>, click your deployed project, and click the <strong>Settings</strong> tab in the top navigation bar.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-3.5 bg-neutral-50 rounded-xl border border-neutral-200/80 flex gap-3">
+                  <div className="w-6 h-6 rounded-full bg-neutral-900 text-white text-xs font-bold flex items-center justify-center shrink-0">
+                    2
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-neutral-950">Go to Environment Variables</h4>
+                    <p className="text-neutral-600 mt-0.5">
+                      In the left sidebar under Project Settings, click <strong>Environment Variables</strong>.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-3.5 bg-neutral-50 rounded-xl border border-neutral-200/80 flex gap-3">
+                  <div className="w-6 h-6 rounded-full bg-neutral-900 text-white text-xs font-bold flex items-center justify-center shrink-0">
+                    3
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h4 className="font-semibold text-neutral-950">Add the 3 Environment Variables</h4>
+                    <p className="text-neutral-600 mt-0.5 mb-2">
+                      Add each variable with its exact Key and Value. Make sure <strong>Production</strong>, <strong>Preview</strong>, and <strong>Development</strong> are checked:
+                    </p>
+                    <div className="bg-neutral-950 text-neutral-200 p-3 rounded-lg font-mono text-[11px] space-y-1.5 overflow-x-auto">
+                      <div><span className="text-emerald-400">CLOUDINARY_CLOUD_NAME</span>="tis87kjf"</div>
+                      <div><span className="text-emerald-400">CLOUDINARY_API_KEY</span>="425216243798441"</div>
+                      <div><span className="text-emerald-400">CLOUDINARY_API_SECRET</span>="Txp59TP7lxIfBxWYV550A91odbM"</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-3.5 bg-neutral-50 rounded-xl border border-neutral-200/80 flex gap-3">
+                  <div className="w-6 h-6 rounded-full bg-neutral-900 text-white text-xs font-bold flex items-center justify-center shrink-0">
+                    4
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-neutral-950">Save Variables and Redeploy</h4>
+                    <p className="text-neutral-600 mt-0.5">
+                      Click <strong>Save</strong> on each variable. Then navigate to the <strong>Deployments</strong> tab in Vercel → click the <strong>three dots (...)</strong> on your latest deployment → click <strong>Redeploy</strong> (uncheck "Use existing Build Cache" so new environment variables are applied).
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-3.5 bg-neutral-50 rounded-xl border border-neutral-200/80 flex gap-3">
+                  <div className="w-6 h-6 rounded-full bg-neutral-900 text-white text-xs font-bold flex items-center justify-center shrink-0">
+                    5
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-neutral-950">Verify Connection & Upload Product Photos</h4>
+                    <p className="text-neutral-600 mt-0.5">
+                      Once redeployment completes, return to this tab and click <strong>Check Connection</strong>. The status will turn to <strong className="text-emerald-700">Connected</strong>, and you can upload photos when adding or editing glasses frames!
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================= TAB 4: FIREBASE SECURITY INFO ================= */}
+        {activeTab === 'setup' && (
+          <div className="max-w-2xl mx-auto bg-white rounded-2xl border border-neutral-200/90 shadow-sm p-6 sm:p-8">
+            <div>
               <div className="flex items-center gap-3 pb-4 border-b border-neutral-100">
-                <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center">
+                <div className="w-10 h-10 rounded-xl bg-neutral-900 text-white flex items-center justify-center shadow-xs shrink-0">
                   <Shield className="w-5 h-5" />
                 </div>
                 <div>
-                  <h2 className="font-serif text-2xl font-semibold text-neutral-950">
-                    Firebase Authentication & Security
+                  <h2 className="font-serif text-xl sm:text-2xl font-semibold text-neutral-950">
+                    Owner Security Architecture
                   </h2>
-                  <p className="text-xs text-neutral-500">
+                  <p className="text-xs text-neutral-500 mt-0.5">
                     How The Shade Store admin panel is protected with Firebase
                   </p>
                 </div>
@@ -1349,46 +1727,22 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
                   </p>
                 </div>
 
-                {/* Cloudinary Setup Instructions */}
-                <div className="p-4 bg-white rounded-xl border-2 border-neutral-900/10 shadow-xs">
-                  <div className="flex items-center justify-between mb-2">
-                    <h3 className="font-semibold text-neutral-950 flex items-center gap-1.5">
-                      <CloudUpload className="w-4 h-4 text-neutral-900" />
-                      4. Cloudinary Signed Photo Uploads (Where to Add Secrets)
-                    </h3>
-                    {cloudinaryConfigured ? (
-                      <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                        <span>Connected: {cloudinaryCloudName}</span>
-                      </span>
-                    ) : (
-                      <span className="text-[11px] font-semibold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 flex items-center gap-1">
-                        <Info className="w-3 h-3 text-amber-600" />
-                        <span>
-                          {cloudinaryMissing.length > 0
-                            ? `Missing: ${cloudinaryMissing.join(', ')}`
-                            : 'Setup Required'}
-                        </span>
-                      </span>
-                    )}
+                {/* Cloudinary Link Banner */}
+                <div className="p-4 bg-white rounded-xl border-2 border-neutral-900/10 shadow-xs flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <CloudUpload className="w-5 h-5 text-neutral-900 shrink-0" />
+                    <div>
+                      <h4 className="text-xs font-semibold text-neutral-950">Cloudinary Photo Setup</h4>
+                      <p className="text-[11px] text-neutral-500">Configure your 3 environment variables for signed photo uploads</p>
+                    </div>
                   </div>
-
-                  <p className="text-xs text-neutral-600 mb-3 leading-relaxed">
-                    To enable instant product photo uploads directly to Cloudinary CDN in your deployed production store, add the following <strong>3 environment secrets</strong> in your hosting deployment settings (Google Cloud Run / AI Studio Secrets panel):
-                  </p>
-
-                  <div className="bg-neutral-950 text-neutral-200 p-3.5 rounded-xl font-mono text-xs space-y-1.5 overflow-x-auto">
-                    <div className="text-neutral-400 text-[11px]"># Add these 3 environment variables in deployment hosting settings:</div>
-                    <div><span className="text-emerald-400">CLOUDINARY_CLOUD_NAME</span>="<span className="text-neutral-400">your_cloud_name</span>"</div>
-                    <div><span className="text-emerald-400">CLOUDINARY_API_KEY</span>="<span className="text-neutral-400">your_api_key</span>"</div>
-                    <div><span className="text-emerald-400">CLOUDINARY_API_SECRET</span>="<span className="text-neutral-400">your_api_secret</span>"</div>
-                  </div>
-
-                  <div className="mt-3 text-xs text-neutral-600 space-y-1">
-                    <p>• <strong>Strict Server-Side Protection:</strong> <code>CLOUDINARY_API_SECRET</code> stays strictly on the Express backend and is <strong>never</strong> transmitted to the browser.</p>
-                    <p>• <strong>Cryptographic Signatures:</strong> The server generates HMAC-SHA1 signatures for authenticated admin requests only. Unsigned presets are forbidden.</p>
-                    <p>• <strong>Permanent CDN URLs:</strong> Once uploaded, images live permanently on Cloudinary CDN and their secure HTTPS URLs are saved to the persistent catalog.</p>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('cloudinary')}
+                    className="px-3 py-1.5 bg-neutral-900 hover:bg-neutral-800 text-white rounded-lg text-xs font-medium shrink-0 cursor-pointer"
+                  >
+                    Open Setup
+                  </button>
                 </div>
               </div>
             </div>
