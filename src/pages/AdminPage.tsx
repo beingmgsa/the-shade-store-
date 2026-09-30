@@ -89,6 +89,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
   // Cloudinary Signed Upload state
   const [cloudinaryConfigured, setCloudinaryConfigured] = useState<boolean | null>(null);
   const [cloudinaryCloudName, setCloudinaryCloudName] = useState<string | null>(null);
+  const [cloudinaryMissing, setCloudinaryMissing] = useState<string[]>([]);
   const [isUploadingImage, setIsUploadingImage] = useState<boolean>(false);
   const [uploadProgress, setUploadProgress] = useState<string | null>(null);
 
@@ -103,7 +104,30 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setNotification({ type, message });
-    setTimeout(() => setNotification(null), 4000);
+    setTimeout(() => setNotification(null), 5000);
+  };
+
+  // Safe response parser that never throws cryptic JSON SyntaxErrors on HTML/text responses
+  const safeParseResponse = async (res: Response, endpointName: string): Promise<any> => {
+    const rawText = await res.text();
+    let data: any = null;
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      data = null;
+    }
+
+    if (data && typeof data === 'object') {
+      return data;
+    }
+
+    // Extract clean human-readable text from HTML/proxy response (e.g. 502/404)
+    const cleaned = rawText.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 140);
+    throw new Error(
+      cleaned
+        ? `${endpointName} error (${res.status}): ${cleaned}`
+        : `${endpointName} returned status ${res.status} (${res.statusText || 'Non-JSON response'})`
+    );
   };
 
   // Check Cloudinary setup on server
@@ -112,16 +136,28 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
     if (!targetUser) return;
     try {
       const token = await targetUser.getIdToken();
-      const res = await fetch('/api/admin/cloudinary-status', {
-        headers: { Authorization: `Bearer ${token}` },
+      const res = await fetch(`/api/admin/cloudinary-status?t=${Date.now()}`, {
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          'Cache-Control': 'no-cache',
+        },
       });
-      if (res.ok) {
-        const data = await res.json();
-        setCloudinaryConfigured(data.configured);
-        setCloudinaryCloudName(data.cloudName);
+
+      const data = await safeParseResponse(res, 'Cloudinary Status');
+      setCloudinaryConfigured(Boolean(data.configured));
+      setCloudinaryCloudName(data.cloudName || null);
+      if (data.missing) {
+        const missingKeys: string[] = [];
+        if (data.missing.cloudName) missingKeys.push('CLOUDINARY_CLOUD_NAME');
+        if (data.missing.apiKey) missingKeys.push('CLOUDINARY_API_KEY');
+        if (data.missing.apiSecret) missingKeys.push('CLOUDINARY_API_SECRET');
+        setCloudinaryMissing(missingKeys);
+      } else {
+        setCloudinaryMissing([]);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to check Cloudinary status:', err);
+      setCloudinaryConfigured(false);
     }
   };
 
@@ -147,36 +183,45 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
 
     try {
       const token = await currentUser.getIdToken();
-      const signRes = await fetch('/api/admin/cloudinary-sign', {
+      const signRes = await fetch(`/api/admin/cloudinary-sign?t=${Date.now()}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
+          'Cache-Control': 'no-cache',
         },
       });
 
-      const signData = await signRes.json();
+      const signData = await safeParseResponse(signRes, 'Upload Signer (/api/admin/cloudinary-sign)');
+      
       if (!signRes.ok) {
-        throw new Error(signData.error || 'Failed to generate signed upload credentials');
+        if (signData.missing && Array.isArray(signData.missing) && signData.missing.length > 0) {
+          throw new Error(`Cloudinary setup required: Missing ${signData.missing.join(', ')} in hosting settings/secrets.`);
+        }
+        throw new Error(signData.error || `Upload signing failed with HTTP status ${signRes.status}`);
       }
 
-      setUploadProgress('Uploading image to Cloudinary CDN...');
+      if (!signData.signature || !signData.apiKey || !signData.cloudName) {
+        throw new Error('Incomplete signature received from server.');
+      }
+
+      setUploadProgress('Uploading image directly to Cloudinary CDN...');
 
       const formData = new FormData();
       formData.append('file', file);
       formData.append('api_key', signData.apiKey);
       formData.append('timestamp', String(signData.timestamp));
       formData.append('signature', signData.signature);
-      formData.append('folder', signData.folder);
+      formData.append('folder', signData.folder || 'the_shade_store/products');
 
       const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/${signData.cloudName}/image/upload`, {
         method: 'POST',
         body: formData,
       });
 
-      const uploadData = await uploadRes.json();
+      const uploadData = await safeParseResponse(uploadRes, 'Cloudinary CDN');
       if (!uploadRes.ok) {
-        throw new Error(uploadData.error?.message || 'Cloudinary upload failed');
+        throw new Error(uploadData?.error?.message || `Cloudinary upload failed with HTTP status ${uploadRes.status}`);
       }
 
       if (!uploadData.secure_url || typeof uploadData.secure_url !== 'string' || !uploadData.secure_url.startsWith('http')) {
@@ -186,6 +231,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
       showToast('Photo uploaded to Cloudinary CDN successfully!');
       return uploadData.secure_url;
     } catch (err: any) {
+      console.error('Image upload failed:', err);
       showToast(err.message || 'Image upload failed', 'error');
       return null;
     } finally {
@@ -1319,17 +1365,21 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
                     ) : (
                       <span className="text-[11px] font-semibold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 flex items-center gap-1">
                         <Info className="w-3 h-3 text-amber-600" />
-                        <span>Not Configured Yet</span>
+                        <span>
+                          {cloudinaryMissing.length > 0
+                            ? `Missing: ${cloudinaryMissing.join(', ')}`
+                            : 'Setup Required'}
+                        </span>
                       </span>
                     )}
                   </div>
 
                   <p className="text-xs text-neutral-600 mb-3 leading-relaxed">
-                    To enable instant product photo uploads from your phone or computer to Cloudinary CDN, add your 3 Cloudinary secrets in this builder's <strong>Secrets Panel</strong>:
+                    To enable instant product photo uploads directly to Cloudinary CDN in your deployed production store, add the following <strong>3 environment secrets</strong> in your hosting deployment settings (Google Cloud Run / AI Studio Secrets panel):
                   </p>
 
                   <div className="bg-neutral-950 text-neutral-200 p-3.5 rounded-xl font-mono text-xs space-y-1.5 overflow-x-auto">
-                    <div className="text-neutral-400 text-[11px]"># Add these 3 key-value secrets in AI Studio's Secrets panel:</div>
+                    <div className="text-neutral-400 text-[11px]"># Add these 3 environment variables in deployment hosting settings:</div>
                     <div><span className="text-emerald-400">CLOUDINARY_CLOUD_NAME</span>="<span className="text-neutral-400">your_cloud_name</span>"</div>
                     <div><span className="text-emerald-400">CLOUDINARY_API_KEY</span>="<span className="text-neutral-400">your_api_key</span>"</div>
                     <div><span className="text-emerald-400">CLOUDINARY_API_SECRET</span>="<span className="text-neutral-400">your_api_secret</span>"</div>
@@ -1337,8 +1387,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
 
                   <div className="mt-3 text-xs text-neutral-600 space-y-1">
                     <p>• <strong>Strict Server-Side Protection:</strong> <code>CLOUDINARY_API_SECRET</code> stays strictly on the Express backend and is <strong>never</strong> transmitted to the browser.</p>
-                    <p>• <strong>Signed Uploads Only:</strong> The server computes an HMAC-SHA1 cryptographic signature for authenticated owner requests. Unsigned upload presets are completely disallowed.</p>
-                    <p>• <strong>Direct-to-CDN:</strong> Once signed, images upload straight to Cloudinary and the returned secure HTTPS URL is saved with the frame.</p>
+                    <p>• <strong>Cryptographic Signatures:</strong> The server generates HMAC-SHA1 signatures for authenticated admin requests only. Unsigned presets are forbidden.</p>
+                    <p>• <strong>Permanent CDN URLs:</strong> Once uploaded, images live permanently on Cloudinary CDN and their secure HTTPS URLs are saved to the persistent catalog.</p>
                   </div>
                 </div>
               </div>

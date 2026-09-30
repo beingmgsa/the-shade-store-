@@ -1,4 +1,5 @@
-import express, { Request, Response, NextFunction } from 'express';
+import express from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import fs from 'fs';
@@ -477,6 +478,27 @@ app.post('/api/admin/products/reset', requireOwnerAuth, (_req: Request, res: Res
   res.setHeader('Cache-Control', 'no-store');
   saveProducts(DEFAULT_PRODUCTS);
   res.json({ message: 'Catalog reset to defaults', products: DEFAULT_PRODUCTS });
+});
+
+// Explicit JSON 404 for unmatched /api routes to prevent HTML index.html fallback
+app.all('/api/*', (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.status(404).json({
+    error: `API route not found: ${req.method} ${req.path}`,
+    status: 404,
+  });
+});
+
+// Global JSON error handler for express routes
+app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+  console.error('Unhandled server error on route:', err);
+  if (!res.headersSent) {
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(500).json({
+      error: err?.message || 'Internal server error',
+      status: 500,
+    });
+  }
 });
 
 // ======================== VITE INTEGRATION ========================
