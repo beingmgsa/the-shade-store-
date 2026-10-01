@@ -19,8 +19,10 @@ import { UserMenu } from './components/UserMenu';
 import { AuthModal } from './components/AuthModal';
 import { ProductDetailsModal } from './components/ProductDetailsModal';
 import { WhatsAppIcon } from './components/WhatsAppIcon';
-import { AdminPage } from './pages/AdminPage';
 import { useAuth } from './context/AuthContext';
+
+// Code-split AdminPage: Loads admin code on-demand only when visiting /admin, keeping customer public bundle lightweight
+const AdminPage = React.lazy(() => import('./pages/AdminPage').then(m => ({ default: m.AdminPage })));
 
 const OWNER_EMAIL = 'beingmagrajwork@gmail.com';
 
@@ -101,12 +103,22 @@ export default function App() {
   // Render Admin Portal if visiting /admin
   if (isAdminRoute) {
     return (
-      <AdminPage 
-        onBackToStore={() => {
-          setIsAdminRoute(false);
-          window.history.pushState({}, '', '/');
-        }} 
-      />
+      <React.Suspense fallback={
+        <div className="min-h-screen bg-[#FAF9F6] flex flex-col items-center justify-center p-4 text-center">
+          <div className="w-10 h-10 rounded-xl bg-neutral-900 text-white flex items-center justify-center mb-3 shadow-xs animate-pulse">
+            <Shield className="w-5 h-5 text-emerald-400" />
+          </div>
+          <p className="font-serif text-xl font-semibold text-neutral-900">The Shade Store Admin</p>
+          <p className="text-xs text-neutral-500 mt-1">Opening store manager...</p>
+        </div>
+      }>
+        <AdminPage 
+          onBackToStore={() => {
+            setIsAdminRoute(false);
+            window.history.pushState({}, '', '/');
+          }} 
+        />
+      </React.Suspense>
     );
   }
 

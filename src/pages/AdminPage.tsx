@@ -46,6 +46,8 @@ import {
   FIRESTORE_ENABLE_URL,
   GlassesProduct 
 } from '../firebase/productsService';
+import { compressProductImage } from '../utils/imageCompressor';
+import { useAuth } from '../context/AuthContext';
 
 const OWNER_EMAIL = 'beingmagrajwork@gmail.com';
 
@@ -61,9 +63,17 @@ export interface AdminPageProps {
 }
 
 export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [isOwner, setIsOwner] = useState<boolean>(false);
-  const [authLoading, setAuthLoading] = useState<boolean>(true);
+  const { user: authUser, loading: authContextLoading } = useAuth();
+
+  const [currentUser, setCurrentUser] = useState<User | null>(() => authUser || auth.currentUser);
+  const [isOwner, setIsOwner] = useState<boolean>(() => {
+    const email = (authUser?.email || auth.currentUser?.email || '').toLowerCase().trim();
+    return email === OWNER_EMAIL.toLowerCase().trim();
+  });
+  const [authLoading, setAuthLoading] = useState<boolean>(() => {
+    if (authUser || auth.currentUser) return false;
+    return authContextLoading;
+  });
 
   // Form states
   const [emailInput, setEmailInput] = useState<string>(OWNER_EMAIL);
@@ -176,7 +186,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
     }
   };
 
-  // Upload image to Cloudinary using signed signature
+  // Upload image to Cloudinary using signed signature and in-browser compression
   const uploadToCloudinary = async (file: File): Promise<string | null> => {
     if (!currentUser || !isOwner) {
       showToast('Admin authentication required', 'error');
@@ -188,15 +198,24 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
       return null;
     }
 
-    if (file.size > 10 * 1024 * 1024) {
-      showToast('Image file size must be less than 10MB', 'error');
+    if (file.size > 25 * 1024 * 1024) {
+      showToast('Original image file size must be less than 25MB', 'error');
       return null;
     }
 
     setIsUploadingImage(true);
-    setUploadProgress('Requesting secure signature from server...');
 
     try {
+      // Step 1: Optimize and compress smartphone photos in browser to speed up network upload by 5x-10x
+      setUploadProgress('Optimizing photo for web (preserving glasses clarity)...');
+      const optimizedFile = await compressProductImage(file, {
+        maxWidth: 1600,
+        maxHeight: 1600,
+        quality: 0.88,
+      });
+
+      // Step 2: Request signed credentials from server
+      setUploadProgress('Requesting secure signature from server...');
       const token = await currentUser.getIdToken();
       const signRes = await fetch('/api/admin/cloudinary-sign', {
         method: 'POST',
@@ -219,31 +238,55 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
         throw new Error('Incomplete signature received from server.');
       }
 
-      setUploadProgress('Uploading image directly to Cloudinary CDN...');
+      // Step 3: Perform upload with real progress tracking using XMLHttpRequest
+      setUploadProgress('Uploading photo to Cloudinary CDN (0%)...');
 
       const formData = new FormData();
-      formData.append('file', file);
+      formData.append('file', optimizedFile);
       formData.append('api_key', signData.apiKey);
       formData.append('timestamp', String(signData.timestamp));
       formData.append('signature', signData.signature);
       formData.append('folder', signData.folder || 'the_shade_store/products');
 
-      const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/${signData.cloudName}/image/upload`, {
-        method: 'POST',
-        body: formData,
+      const uploadUrl = `https://api.cloudinary.com/v1_1/${signData.cloudName}/image/upload`;
+
+      const uploadResult = await new Promise<{ secure_url?: string; error?: { message: string } }>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', uploadUrl);
+
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            const percent = Math.round((event.loaded / event.total) * 100);
+            setUploadProgress(`Uploading to Cloudinary CDN (${percent}%)...`);
+          }
+        };
+
+        xhr.onload = () => {
+          try {
+            const parsed = JSON.parse(xhr.responseText);
+            if (xhr.status >= 200 && xhr.status < 300) {
+              resolve(parsed);
+            } else {
+              reject(new Error(parsed?.error?.message || `Cloudinary rejected upload with status ${xhr.status}`));
+            }
+          } catch {
+            reject(new Error(`Invalid response from Cloudinary (status ${xhr.status})`));
+          }
+        };
+
+        xhr.onerror = () => {
+          reject(new Error('Network error uploading to Cloudinary CDN. Please check connection.'));
+        };
+
+        xhr.send(formData);
       });
 
-      const uploadData = await safeParseResponse(uploadRes, 'Cloudinary CDN');
-      if (!uploadRes.ok) {
-        throw new Error(uploadData?.error?.message || `Cloudinary upload failed with HTTP status ${uploadRes.status}`);
-      }
-
-      if (!uploadData.secure_url || typeof uploadData.secure_url !== 'string' || !uploadData.secure_url.startsWith('http')) {
+      if (!uploadResult.secure_url || typeof uploadResult.secure_url !== 'string' || !uploadResult.secure_url.startsWith('http')) {
         throw new Error('Cloudinary response did not return a valid permanent image URL');
       }
 
       showToast('Photo uploaded to Cloudinary CDN successfully!');
-      return uploadData.secure_url;
+      return uploadResult.secure_url;
     } catch (err: any) {
       console.error('Image upload failed:', err);
       showToast(err.message || 'Image upload failed', 'error');
@@ -267,6 +310,12 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
 
   // Monitor Firebase Auth State & Subscribe to Realtime Updates
   useEffect(() => {
+    // If owner already available, trigger initial fast fetch immediately
+    if (authUser && authUser.email?.toLowerCase().trim() === OWNER_EMAIL.toLowerCase().trim()) {
+      fetchProducts();
+      checkCloudinaryStatus(authUser);
+    }
+
     // Realtime Firestore product subscription
     const unsubscribeProducts = subscribeToProducts(
       (live) => {
@@ -280,26 +329,30 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
     );
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setAuthLoading(true);
       if (user && user.email) {
         const email = user.email.toLowerCase().trim();
         if (email === OWNER_EMAIL.toLowerCase().trim()) {
           setCurrentUser(user);
           setIsOwner(true);
-          await fetchProducts();
+          setAuthLoading(false);
+          // Only fetch if products are currently empty
+          if (products.length === 0) {
+            await fetchProducts();
+          }
           await checkCloudinaryStatus(user);
         } else {
           // A customer or unauthorized user signed in
           setCurrentUser(null);
           setIsOwner(false);
+          setAuthLoading(false);
           await signOut(auth);
           setAuthError(`Access Denied: Only the store owner (${OWNER_EMAIL}) has administrative privileges.`);
         }
       } else {
         setCurrentUser(null);
         setIsOwner(false);
+        setAuthLoading(false);
       }
-      setAuthLoading(false);
     });
 
     return () => {
@@ -404,9 +457,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
   // Add Product
   const handleAddProduct = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentUser || !isOwner) return;
+    if (!currentUser || !isOwner || isSubmitting) return;
 
-    if (!formName.trim()) {
+    const trimmedName = formName.trim();
+    if (!trimmedName) {
       showToast('Please enter a product name', 'error');
       return;
     }
@@ -417,6 +471,11 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
     }
 
     const imageToUse = formCustomImage.trim() || formImage;
+
+    if (!imageToUse) {
+      showToast('Please select or upload a product photo.', 'error');
+      return;
+    }
 
     if (imageToUse.startsWith('blob:')) {
       showToast('Temporary browser blob cannot be saved to the database. Please wait for Cloudinary upload to complete.', 'error');
@@ -429,7 +488,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
       const id = `frame-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
       const newProduct: GlassesProduct = {
         id,
-        name: formName.trim(),
+        name: trimmedName,
         price: formPrice ? Number(formPrice) : null,
         image: imageToUse,
         itemCode: formItemCode.trim() || undefined,
@@ -441,8 +500,14 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
 
       const { firestoreSuccess, firestoreError } = await saveProductToFirebase(newProduct, token);
 
-      // Refresh list immediately
-      await fetchProducts();
+      if (!firestoreSuccess && firestoreError) {
+        showToast(`Save failed: ${firestoreError}`, 'error');
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Fast update: insert new product at the beginning of products list immediately without blocking full reload
+      setProducts((prev) => [newProduct, ...prev.filter(p => p.id !== newProduct.id)]);
       window.dispatchEvent(new CustomEvent('the-shade-store:products-updated'));
 
       // Reset form
@@ -454,11 +519,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
       setFormAvailable(true);
       setActiveTab('catalog');
 
-      if (firestoreError) {
-        showToast(`Saved! (Firebase note: ${firestoreError.slice(0, 90)}...)`, 'error');
-      } else {
-        showToast(`"${newProduct.name}" saved to Firebase & published with photo!`);
-      }
+      showToast(`"${newProduct.name}" saved to database and published!`);
     } catch (err: any) {
       showToast(err.message || 'Error saving product', 'error');
     } finally {
@@ -469,7 +530,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
   // Update Product
   const handleUpdateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentUser || !isOwner || !editingProduct) return;
+    if (!currentUser || !isOwner || !editingProduct || isSubmitting) return;
 
     if (isUploadingImage) {
       showToast('Please wait for photo upload to finish before saving changes.', 'error');
@@ -499,15 +560,18 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
 
       const { firestoreSuccess, firestoreError } = await saveProductToFirebase(updatedProduct, token);
 
-      await fetchProducts();
+      if (!firestoreSuccess && firestoreError) {
+        showToast(`Update failed: ${firestoreError}`, 'error');
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Update in state immediately
+      setProducts((prev) => prev.map((p) => (p.id === updatedProduct.id ? updatedProduct : p)));
       window.dispatchEvent(new CustomEvent('the-shade-store:products-updated'));
       setEditingProduct(null);
 
-      if (firestoreError) {
-        showToast(`Updated! (Firebase note: ${firestoreError.slice(0, 90)}...)`, 'error');
-      } else {
-        showToast(`"${updatedProduct.name}" updated in Firebase! Permanent photo saved.`);
-      }
+      showToast(`"${updatedProduct.name}" updated successfully!`);
     } catch (err: any) {
       showToast(err.message || 'Error updating product', 'error');
     } finally {
@@ -600,12 +664,14 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
   // -------------------------------------------------------------
   // Render Loading
   // -------------------------------------------------------------
-  if (authLoading) {
+  if (authLoading && !currentUser) {
     return (
       <div className="min-h-screen bg-[#FAF9F6] flex flex-col items-center justify-center p-4 text-center">
-        <RefreshCw className="w-8 h-8 text-neutral-600 animate-spin mb-3" />
-        <p className="font-serif text-xl text-neutral-800">The Shade Store Admin</p>
-        <p className="text-xs text-neutral-500 mt-1">Connecting to Firebase Authentication...</p>
+        <div className="w-10 h-10 rounded-xl bg-neutral-900 text-white flex items-center justify-center mb-3 shadow-xs animate-pulse">
+          <Shield className="w-5 h-5 text-emerald-400" />
+        </div>
+        <p className="font-serif text-xl font-semibold text-neutral-800">The Shade Store Admin</p>
+        <p className="text-xs text-neutral-500 mt-1">Verifying owner credentials...</p>
       </div>
     );
   }
