@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Instagram, Copy, Check, Eye } from 'lucide-react';
+import { Instagram, Copy, Check, Eye, ImageOff } from 'lucide-react';
 import { GlassesItem } from '../data/glassesCatalog';
 
 interface ProductCardProps {
@@ -12,6 +12,8 @@ export const ProductCard: React.FC<ProductCardProps> = ({ item, onInquire, onSel
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);
   const [copiedOnly, setCopiedOnly] = useState(false);
+
+  const hasValidImage = Boolean(item.image && typeof item.image === 'string' && item.image.trim().length > 0);
 
   const formattedPrice = item.price !== null 
     ? `₹${item.price.toLocaleString('en-IN')}` 
@@ -66,14 +68,19 @@ export const ProductCard: React.FC<ProductCardProps> = ({ item, onInquire, onSel
     >
       {/* Product Image Area - Uniform 4:3 Aspect Ratio */}
       <div className="relative aspect-[4/3] w-full bg-[#F5F4F0] overflow-hidden shrink-0">
-        {!imageLoaded && !imageError && (
+        {!imageLoaded && !imageError && hasValidImage && (
           <div className="absolute inset-0 animate-pulse bg-neutral-200/50" />
         )}
         
-        {imageError ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center p-2 text-center text-neutral-400 bg-neutral-100">
-            <span className="font-serif text-xs sm:text-sm text-neutral-600 line-clamp-1">{item.name}</span>
-            <span className="text-[10px] text-neutral-400 mt-0.5">Photo unavailable</span>
+        {imageError || !hasValidImage ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center p-3 text-center text-neutral-400 bg-neutral-100/90 border-b border-neutral-200/60">
+            <div className="w-8 h-8 rounded-full bg-neutral-200/80 flex items-center justify-center mb-1.5 text-neutral-500">
+              <ImageOff className="w-4 h-4" />
+            </div>
+            <span className="font-serif text-xs text-neutral-700 font-medium line-clamp-1">{item.name}</span>
+            <span className="text-[10px] text-neutral-500 mt-0.5">
+              {imageError ? 'Image failed to load' : 'No photo uploaded'}
+            </span>
           </div>
         ) : (
           <img

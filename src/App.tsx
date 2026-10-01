@@ -13,6 +13,7 @@ import {
   Shield
 } from 'lucide-react';
 import { GLASSES_CATALOG, SHOP_INFO, GlassesItem } from './data/glassesCatalog';
+import { getProductsWithFallback, subscribeToProducts, GlassesProduct } from './firebase/productsService';
 import { ProductCard } from './components/ProductCard';
 import { UserMenu } from './components/UserMenu';
 import { AuthModal } from './components/AuthModal';
@@ -48,41 +49,46 @@ export default function App() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
-  // Fetch live products from backend API (with cache busting and fallback)
-  const fetchLiveProducts = () => {
-    fetch(`/api/products?t=${Date.now()}`, {
-      cache: 'no-store',
-      headers: {
-        'Cache-Control': 'no-cache',
-        Pragma: 'no-cache',
-      },
-    })
-      .then((res) => {
-        if (res.ok) return res.json();
-        throw new Error('Failed to load from API');
-      })
-      .then((data: GlassesItem[]) => {
-        if (Array.isArray(data) && data.length > 0) {
-          // Only show available items on the public store
-          const availableOnly = data.filter((item: any) => item.available !== false);
-          setCatalogItems(availableOnly);
-        }
-      })
-      .catch(() => {
-        // Fallback to static GLASSES_CATALOG
-      });
+  // Fetch live products from Firebase Firestore (with API & static catalog fallback)
+  const fetchLiveProducts = async () => {
+    try {
+      const { products } = await getProductsWithFallback();
+      if (Array.isArray(products) && products.length > 0) {
+        // Only show available items on the public store
+        const availableOnly = products.filter((item) => item.available !== false);
+        setCatalogItems(availableOnly);
+      }
+    } catch (err) {
+      console.warn('Error fetching live products:', err);
+    }
   };
 
   useEffect(() => {
     fetchLiveProducts();
 
-    // Listen to real-time update events when admin modifies frames
+    // 1. Realtime Firestore listener: updates reflect immediately across devices
+    const unsubscribeFirestore = subscribeToProducts(
+      (liveProducts) => {
+        if (Array.isArray(liveProducts) && liveProducts.length > 0) {
+          const availableOnly = liveProducts.filter((item) => item.available !== false);
+          setCatalogItems(availableOnly);
+        }
+      },
+      (err) => {
+        // Fallback already handled
+      }
+    );
+
+    // 2. Listen to custom event dispatched when Admin saves product
     const handleUpdateEvent = () => {
       fetchLiveProducts();
     };
 
     window.addEventListener('the-shade-store:products-updated', handleUpdateEvent);
-    return () => window.removeEventListener('the-shade-store:products-updated', handleUpdateEvent);
+    return () => {
+      unsubscribeFirestore();
+      window.removeEventListener('the-shade-store:products-updated', handleUpdateEvent);
+    };
   }, []);
 
   // When switching from Admin back to Store, refresh immediately

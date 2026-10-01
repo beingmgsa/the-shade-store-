@@ -1,5 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
+import { getFirestore } from 'firebase/firestore';
 import { getAnalytics, isSupported } from 'firebase/analytics';
 
 export const firebaseConfig = {
@@ -15,6 +16,7 @@ export const firebaseConfig = {
 // Initialize Firebase safely
 export const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
+export const db = getFirestore(app);
 
 // Initialize Analytics conditionally if supported in environment
 if (typeof window !== 'undefined') {

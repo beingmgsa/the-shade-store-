@@ -10,7 +10,8 @@ import {
   Layers, 
   CheckCircle2, 
   ExternalLink,
-  ShieldCheck
+  ShieldCheck,
+  ImageOff
 } from 'lucide-react';
 import { GlassesItem, SHOP_INFO } from '../data/glassesCatalog';
 import { WhatsAppIcon } from './WhatsAppIcon';
@@ -29,6 +30,11 @@ export const ProductDetailsModal: React.FC<ProductDetailsModalProps> = ({
   onInquireInstagram,
 }) => {
   const [copied, setCopied] = useState(false);
+  const [imgError, setImgError] = useState(false);
+
+  useEffect(() => {
+    setImgError(false);
+  }, [item?.id, item?.image]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -118,11 +124,24 @@ export const ProductDetailsModal: React.FC<ProductDetailsModalProps> = ({
             {/* Large Image Showcase */}
             <div className="sm:col-span-6 w-full">
               <div className="relative aspect-[4/3] rounded-xl overflow-hidden bg-[#F5F4F0] border border-neutral-200/80 shadow-2xs">
-                <img
-                  src={item.image}
-                  alt={item.name}
-                  className="w-full h-full object-cover object-center"
-                />
+                {imgError || !item.image || !item.image.trim() ? (
+                  <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center text-neutral-400 bg-neutral-100">
+                    <div className="w-12 h-12 rounded-full bg-neutral-200/80 flex items-center justify-center mb-2 text-neutral-500">
+                      <ImageOff className="w-6 h-6" />
+                    </div>
+                    <span className="font-serif text-sm font-medium text-neutral-700">{item.name}</span>
+                    <span className="text-xs text-neutral-500 mt-1">
+                      {imgError ? 'Image failed to load' : 'No photo uploaded'}
+                    </span>
+                  </div>
+                ) : (
+                  <img
+                    src={item.image}
+                    alt={item.name}
+                    className="w-full h-full object-cover object-center"
+                    onError={() => setImgError(true)}
+                  />
+                )}
                 {item.itemCode && (
                   <div className="absolute top-2.5 left-2.5 bg-black/75 backdrop-blur-xs text-white px-2 py-0.5 rounded text-[10px] font-mono font-medium tracking-wide">
                     {item.itemCode}

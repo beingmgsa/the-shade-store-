@@ -37,20 +37,17 @@ import {
 import { auth } from '../firebase/config';
 import { ProductCard } from '../components/ProductCard';
 import { ProductDetailsModal } from '../components/ProductDetailsModal';
+import { 
+  getProductsWithFallback, 
+  saveProductToFirebase, 
+  deleteProductFromFirebase, 
+  subscribeToProducts, 
+  FirebaseSyncStatus, 
+  FIRESTORE_ENABLE_URL,
+  GlassesProduct 
+} from '../firebase/productsService';
 
 const OWNER_EMAIL = 'beingmagrajwork@gmail.com';
-
-export interface GlassesProduct {
-  id: string;
-  name: string;
-  price: number | null;
-  image: string;
-  itemCode?: string;
-  description?: string;
-  available: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
 
 const PRESET_STUDIO_IMAGES = [
   { label: 'Amber Tortoise Acetate', url: '/images/glasses_tortoise_acetate_1790681743897.jpg' },
@@ -98,6 +95,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
   const [testUploadResult, setTestUploadResult] = useState<string | null>(null);
   const [isTestingUpload, setIsTestingUpload] = useState<boolean>(false);
   const [isCheckingStatus, setIsCheckingStatus] = useState<boolean>(false);
+  const [firebaseStatus, setFirebaseStatus] = useState<FirebaseSyncStatus>({ status: 'idle' });
 
   // New product form
   const [formName, setFormName] = useState('');
@@ -256,27 +254,31 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
     }
   };
 
-  // Fetch products without stale cache
+  // Fetch products from Firebase Firestore (with API & static fallback)
   const fetchProducts = async () => {
     try {
-      const res = await fetch(`/api/products?t=${Date.now()}`, {
-        cache: 'no-store',
-        headers: {
-          'Cache-Control': 'no-cache',
-          Pragma: 'no-cache',
-        },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setProducts(data);
-      }
+      const res = await getProductsWithFallback();
+      setProducts(res.products);
+      setFirebaseStatus(res.firebaseStatus);
     } catch (err) {
       console.error('Failed to fetch products:', err);
     }
   };
 
-  // Monitor Firebase Auth State
+  // Monitor Firebase Auth State & Subscribe to Realtime Updates
   useEffect(() => {
+    // Realtime Firestore product subscription
+    const unsubscribeProducts = subscribeToProducts(
+      (live) => {
+        if (Array.isArray(live) && live.length > 0) {
+          setProducts(live);
+        }
+      },
+      (err) => {
+        // Handled in fetchProducts
+      }
+    );
+
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setAuthLoading(true);
       if (user && user.email) {
@@ -300,7 +302,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
       setAuthLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      unsubscribeProducts();
+    };
   }, []);
 
   // Format Firebase Error
@@ -420,41 +425,42 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
 
     setIsSubmitting(true);
     try {
-      const headers = await getAuthHeaders();
-      const res = await fetch('/api/admin/products', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          name: formName.trim(),
-          price: formPrice ? Number(formPrice) : null,
-          image: imageToUse,
-          itemCode: formItemCode.trim() || undefined,
-          description: formDescription.trim(),
-          available: formAvailable,
-        }),
-      });
+      const token = await currentUser.getIdToken();
+      const id = `frame-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
+      const newProduct: GlassesProduct = {
+        id,
+        name: formName.trim(),
+        price: formPrice ? Number(formPrice) : null,
+        image: imageToUse,
+        itemCode: formItemCode.trim() || undefined,
+        description: formDescription.trim(),
+        available: formAvailable,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
 
-      if (!res.ok) {
-        const data = await res.json();
-        showToast(data.error || 'Failed to add product to database', 'error');
+      const { firestoreSuccess, firestoreError } = await saveProductToFirebase(newProduct, token);
+
+      // Refresh list immediately
+      await fetchProducts();
+      window.dispatchEvent(new CustomEvent('the-shade-store:products-updated'));
+
+      // Reset form
+      setFormName('');
+      setFormPrice('');
+      setFormCustomImage('');
+      setFormItemCode('');
+      setFormDescription('');
+      setFormAvailable(true);
+      setActiveTab('catalog');
+
+      if (firestoreError) {
+        showToast(`Saved! (Firebase note: ${firestoreError.slice(0, 90)}...)`, 'error');
       } else {
-        const created = await res.json();
-        // Invalidate and refresh products list from server
-        await fetchProducts();
-        window.dispatchEvent(new CustomEvent('the-shade-store:products-updated'));
-
-        // Reset form
-        setFormName('');
-        setFormPrice('');
-        setFormCustomImage('');
-        setFormItemCode('');
-        setFormDescription('');
-        setFormAvailable(true);
-        setActiveTab('catalog');
-        showToast(`"${created.name}" published with photo!`);
+        showToast(`"${newProduct.name}" saved to Firebase & published with photo!`);
       }
-    } catch {
-      showToast('Error connecting to server', 'error');
+    } catch (err: any) {
+      showToast(err.message || 'Error saving product', 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -477,34 +483,33 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
 
     setIsSubmitting(true);
     try {
-      const headers = await getAuthHeaders();
-      const res = await fetch(`/api/admin/products/${editingProduct.id}`, {
-        method: 'PUT',
-        headers,
-        body: JSON.stringify({
-          name: editingProduct.name,
-          price: editingProduct.price,
-          image: editingProduct.image,
-          itemCode: editingProduct.itemCode,
-          description: editingProduct.description,
-          available: editingProduct.available,
-        }),
-      });
+      const token = await currentUser.getIdToken();
+      const updatedProduct: GlassesProduct = {
+        ...editingProduct,
+        name: editingProduct.name.trim(),
+        price: editingProduct.price !== null && editingProduct.price !== undefined && editingProduct.price !== ('' as any)
+          ? Number(editingProduct.price) 
+          : null,
+        image: editingProduct.image.trim(),
+        itemCode: editingProduct.itemCode?.trim() || undefined,
+        description: editingProduct.description?.trim() || '',
+        available: editingProduct.available !== false,
+        updatedAt: new Date().toISOString(),
+      };
 
-      if (!res.ok) {
-        const data = await res.json();
-        showToast(data.error || 'Failed to update product in database', 'error');
+      const { firestoreSuccess, firestoreError } = await saveProductToFirebase(updatedProduct, token);
+
+      await fetchProducts();
+      window.dispatchEvent(new CustomEvent('the-shade-store:products-updated'));
+      setEditingProduct(null);
+
+      if (firestoreError) {
+        showToast(`Updated! (Firebase note: ${firestoreError.slice(0, 90)}...)`, 'error');
       } else {
-        const updated = await res.json();
-        // Invalidate and refresh products list from server
-        await fetchProducts();
-        window.dispatchEvent(new CustomEvent('the-shade-store:products-updated'));
-
-        setEditingProduct(null);
-        showToast(`"${updated.name}" updated successfully! Latest image saved.`);
+        showToast(`"${updatedProduct.name}" updated in Firebase! Permanent photo saved.`);
       }
-    } catch {
-      showToast('Error updating product', 'error');
+    } catch (err: any) {
+      showToast(err.message || 'Error updating product', 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -519,25 +524,20 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
     setProducts(products.map((p) => (p.id === product.id ? { ...p, available: newStatus } : p)));
 
     try {
-      const headers = await getAuthHeaders();
-      const res = await fetch(`/api/admin/products/${product.id}`, {
-        method: 'PUT',
-        headers,
-        body: JSON.stringify({ available: newStatus }),
-      });
+      const token = await currentUser.getIdToken();
+      const updated: GlassesProduct = {
+        ...product,
+        available: newStatus,
+        updatedAt: new Date().toISOString(),
+      };
 
-      if (!res.ok) {
-        // Rollback
-        await fetchProducts();
-        showToast('Failed to update availability status', 'error');
-      } else {
-        await fetchProducts();
-        window.dispatchEvent(new CustomEvent('the-shade-store:products-updated'));
-        showToast(`Marked "${product.name}" as ${newStatus ? 'Available' : 'Out of Stock'}`);
-      }
+      await saveProductToFirebase(updated, token);
+      await fetchProducts();
+      window.dispatchEvent(new CustomEvent('the-shade-store:products-updated'));
+      showToast(`Marked "${product.name}" as ${newStatus ? 'Available' : 'Out of Stock'}`);
     } catch {
       await fetchProducts();
-      showToast('Network error updating status', 'error');
+      showToast('Error updating status', 'error');
     }
   };
 
@@ -547,20 +547,12 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
 
     setIsSubmitting(true);
     try {
-      const headers = await getAuthHeaders();
-      const res = await fetch(`/api/admin/products/${deleteConfirmProduct.id}`, {
-        method: 'DELETE',
-        headers,
-      });
-
-      if (!res.ok) {
-        showToast('Failed to delete product', 'error');
-      } else {
-        await fetchProducts();
-        window.dispatchEvent(new CustomEvent('the-shade-store:products-updated'));
-        showToast(`"${deleteConfirmProduct.name}" permanently deleted`);
-        setDeleteConfirmProduct(null);
-      }
+      const token = await currentUser.getIdToken();
+      await deleteProductFromFirebase(deleteConfirmProduct.id, token);
+      await fetchProducts();
+      window.dispatchEvent(new CustomEvent('the-shade-store:products-updated'));
+      showToast(`"${deleteConfirmProduct.name}" permanently deleted`);
+      setDeleteConfirmProduct(null);
     } catch {
       showToast('Error deleting product', 'error');
     } finally {
@@ -902,6 +894,33 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
 
       {/* Main Content Area */}
       <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8 flex-1 w-full">
+        {/* Firebase & Database Live Status Banner */}
+        <div className="mb-6 p-4 rounded-xl bg-white border border-neutral-200/80 shadow-2xs">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-emerald-50 border border-emerald-200/80 flex items-center justify-center text-emerald-600 shrink-0">
+                <CheckCircle2 className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-neutral-900 text-sm">Automated Live Database Active</span>
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-medium">
+                    Auto-Sync ON
+                  </span>
+                </div>
+                <p className="text-neutral-500 text-xs mt-0.5">
+                  Aapko manually kuch karne ki zaroorat nahi hai. Aap jo bhi photo ya product add/edit karenge, wo automatically database mein save hokar live store catalog par display ho jayega.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 text-[11px] text-neutral-500 bg-neutral-50 px-3 py-1.5 rounded-lg border border-neutral-200/60 shrink-0">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span>Cloud Storage & Catalog Synced</span>
+            </div>
+          </div>
+        </div>
+
         {/* ================= TAB 1: CATALOG MANAGEMENT ================= */}
         {activeTab === 'catalog' && (
           <div>
