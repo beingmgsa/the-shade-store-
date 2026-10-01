@@ -8,7 +8,7 @@ export interface CloudinaryConfig {
 }
 
 export function getCloudinaryConfig(): CloudinaryConfig {
-  const cloudName = (process.env.CLOUDINARY_CLOUD_NAME || '').trim();
+  const cloudName = (process.env.CLOUDINARY_CLOUD_NAME || 'tis87kjf').trim();
   const apiKey = (process.env.CLOUDINARY_API_KEY || '').trim();
   const apiSecret = (process.env.CLOUDINARY_API_SECRET || '').trim();
 

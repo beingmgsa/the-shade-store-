@@ -36,10 +36,10 @@ export const UserMenu: React.FC<UserMenuProps> = ({ onOpenAuth, onOpenAdmin }) =
         onClick={() => onOpenAuth('signin')}
         type="button"
         className="min-h-[38px] sm:min-h-[40px] px-2.5 sm:px-3.5 py-1.5 inline-flex items-center gap-1.5 rounded-lg border border-neutral-300 hover:border-neutral-900 bg-white hover:bg-neutral-50 text-neutral-900 text-xs sm:text-sm font-medium transition-colors shadow-2xs cursor-pointer"
-        title="Sign In or Sign Up"
+        title="Owner Login"
       >
-        <UserIcon className="w-3.5 h-3.5 text-neutral-600 shrink-0" />
-        <span className="whitespace-nowrap">Sign In</span>
+        <Shield className="w-3.5 h-3.5 text-neutral-600 shrink-0" />
+        <span className="whitespace-nowrap">Owner Login</span>
       </button>
     );
   }

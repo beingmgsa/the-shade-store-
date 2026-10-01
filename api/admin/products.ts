@@ -25,15 +25,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const products = getProducts();
 
-  // POST: Add new frame
+  // POST: Add new frame or upsert
   if (req.method === 'POST') {
-    const { name, price, image, itemCode, description, available } = req.body || {};
+    const { id: incomingId, name, price, image, itemCode, description, available } = req.body || {};
 
     if (!name || typeof name !== 'string' || !name.trim()) {
       return res.status(400).json({ error: 'Product name is required' });
     }
 
-    const id = `frame-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
+    // Check if product with this ID already exists -> update it
+    if (incomingId && typeof incomingId === 'string') {
+      const existingIdx = products.findIndex((p) => p.id === incomingId);
+      if (existingIdx !== -1) {
+        const cur = products[existingIdx];
+        const updated: GlassesProduct = {
+          ...cur,
+          name: name.trim(),
+          price: price !== undefined ? (price === null || price === '' ? null : Number(price)) : cur.price,
+          image: normalizeProductImage(image) || cur.image,
+          itemCode: itemCode && typeof itemCode === 'string' && itemCode.trim() ? itemCode.trim() : cur.itemCode,
+          description: description && typeof description === 'string' ? description.trim() : cur.description,
+          available: available !== undefined ? Boolean(available) : cur.available,
+          updatedAt: new Date().toISOString(),
+        };
+        products[existingIdx] = updated;
+        saveProducts(products);
+        return res.status(200).json(updated);
+      }
+    }
+
+    const id = incomingId && typeof incomingId === 'string' && incomingId.trim()
+      ? incomingId.trim()
+      : `frame-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
+
     const newProduct: GlassesProduct = {
       id,
       name: name.trim(),

@@ -224,13 +224,23 @@ export async function deleteProductFromFirebase(productId: string, authToken?: s
 
   try {
     if (authToken) {
-      await fetch(`/api/admin/products/${productId}`, {
+      // First try query parameter on /api/admin/products, then route param
+      const res = await fetch(`/api/admin/products?id=${encodeURIComponent(productId)}`, {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${authToken}`,
         },
       });
+      if (!res.ok) {
+        await fetch(`/api/admin/products/${encodeURIComponent(productId)}`, {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${authToken}`,
+          },
+        });
+      }
     }
   } catch (apiErr) {
     console.warn('Backend API sync delete error:', apiErr);
@@ -250,12 +260,10 @@ export function subscribeToProducts(
   return onSnapshot(
     productsRef,
     (snapshot) => {
-      if (!snapshot.empty) {
-        const items: GlassesProduct[] = [];
-        snapshot.forEach((d) => items.push(normalizeProductDoc(d.id, d.data())));
-        items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        onUpdate(items);
-      }
+      const items: GlassesProduct[] = [];
+      snapshot.forEach((d) => items.push(normalizeProductDoc(d.id, d.data())));
+      items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      onUpdate(items);
     },
     (err) => {
       console.warn('Firestore snapshot listener notice:', err);

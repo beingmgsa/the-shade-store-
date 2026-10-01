@@ -17,7 +17,7 @@ const FIREBASE_PROJECT_ID = 'the-shade-store-2335e';
 
 // Helper to get fresh Cloudinary configuration from environment variables
 function getCloudinaryConfig() {
-  const cloudName = (process.env.CLOUDINARY_CLOUD_NAME || '').trim();
+  const cloudName = (process.env.CLOUDINARY_CLOUD_NAME || 'tis87kjf').trim();
   const apiKey = (process.env.CLOUDINARY_API_KEY || '').trim();
   const apiSecret = (process.env.CLOUDINARY_API_SECRET || '').trim();
   return {
@@ -375,10 +375,10 @@ app.post('/api/admin/cloudinary-sign', requireOwnerAuth, (_req: Request, res: Re
   });
 });
 
-// 6. Admin Products: Add
+// 6. Admin Products: Add or Upsert
 app.post('/api/admin/products', requireOwnerAuth, (req: Request, res: Response) => {
   res.setHeader('Cache-Control', 'no-store');
-  const { name, price, image, itemCode, description, available } = req.body;
+  const { id: incomingId, name, price, image, itemCode, description, available } = req.body;
 
   if (!name || typeof name !== 'string' || !name.trim()) {
     res.status(400).json({ error: 'Product name is required.' });
@@ -386,9 +386,38 @@ app.post('/api/admin/products', requireOwnerAuth, (req: Request, res: Response) 
   }
 
   const normalizedImage = normalizeProductImage(image);
-
   const products = getProducts();
-  const id = `frame-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
+
+  // If an ID is provided and exists in the list, update it (upsert)
+  if (incomingId && typeof incomingId === 'string') {
+    const existingIndex = products.findIndex((p) => p.id === incomingId);
+    if (existingIndex !== -1) {
+      const current = products[existingIndex];
+      const updated: GlassesProduct = {
+        ...current,
+        name: name.trim(),
+        price: price !== undefined ? (price === null || price === '' ? null : Number(price)) : current.price,
+        image: normalizedImage || current.image,
+        itemCode: itemCode !== undefined && typeof itemCode === 'string' && itemCode.trim() ? itemCode.trim() : current.itemCode,
+        description: description !== undefined && typeof description === 'string' ? description.trim() : current.description,
+        available: available !== undefined ? Boolean(available) : current.available,
+        updatedAt: new Date().toISOString(),
+      };
+      products[existingIndex] = updated;
+      try {
+        saveProducts(products);
+        res.status(200).json(updated);
+        return;
+      } catch (err: any) {
+        res.status(500).json({ error: 'Failed to write product to database: ' + (err.message || 'Server error') });
+        return;
+      }
+    }
+  }
+
+  const id = incomingId && typeof incomingId === 'string' && incomingId.trim()
+    ? incomingId.trim()
+    : `frame-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
 
   const newProduct: GlassesProduct = {
     id,

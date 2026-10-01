@@ -53,8 +53,8 @@ export default function App() {
   const fetchLiveProducts = async () => {
     try {
       const { products } = await getProductsWithFallback();
-      if (Array.isArray(products) && products.length > 0) {
-        // Only show available items on the public store
+      if (Array.isArray(products)) {
+        // Filter out unavailable items for customers
         const availableOnly = products.filter((item) => item.available !== false);
         setCatalogItems(availableOnly);
       }
@@ -66,10 +66,10 @@ export default function App() {
   useEffect(() => {
     fetchLiveProducts();
 
-    // 1. Realtime Firestore listener: updates reflect immediately across devices
+    // 1. Realtime Firestore listener: updates reflect immediately across devices for all customers
     const unsubscribeFirestore = subscribeToProducts(
       (liveProducts) => {
-        if (Array.isArray(liveProducts) && liveProducts.length > 0) {
+        if (Array.isArray(liveProducts)) {
           const availableOnly = liveProducts.filter((item) => item.available !== false);
           setCatalogItems(availableOnly);
         }
@@ -79,7 +79,7 @@ export default function App() {
       }
     );
 
-    // 2. Listen to custom event dispatched when Admin saves product
+    // 2. Listen to custom event dispatched when Admin saves or deletes a product
     const handleUpdateEvent = () => {
       fetchLiveProducts();
     };
@@ -329,19 +329,38 @@ export default function App() {
         </div>
 
         {/* Unified Mixed Product Grid - 2 columns on mobile, 3 on tablet, 4 on desktop */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-4 md:gap-5 w-full items-stretch">
-          {catalogItems.map((item) => (
-            <ProductCard
-              key={item.id}
-              item={item}
-              onInquire={handleInquire}
-              onSelect={(it) => {
-                setSelectedProduct(it);
-                setIsDetailsModalOpen(true);
-              }}
-            />
-          ))}
-        </div>
+        {catalogItems.length === 0 ? (
+          <div className="py-12 sm:py-16 text-center max-w-md mx-auto px-4 bg-white rounded-2xl border border-neutral-200/90 shadow-2xs">
+            <Instagram className="w-8 h-8 text-pink-500 mx-auto mb-3" />
+            <h3 className="font-serif text-lg font-medium text-neutral-900">New Collection Coming Soon</h3>
+            <p className="mt-1 text-xs sm:text-sm text-neutral-600 leading-relaxed">
+              Our latest frames are being photographed. Explore our Instagram page for today's in-store frames and new arrivals.
+            </p>
+            <a
+              href={SHOP_INFO.instagramUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-4 inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-gradient-to-r from-[#833AB4] via-[#FD1D1D] to-[#F77737] text-white rounded-xl text-xs font-semibold shadow-xs hover:brightness-110 transition-all cursor-pointer"
+            >
+              <Instagram className="w-4 h-4 text-white" />
+              <span>View Frames on Instagram</span>
+            </a>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-4 md:gap-5 w-full items-stretch">
+            {catalogItems.map((item) => (
+              <ProductCard
+                key={item.id}
+                item={item}
+                onInquire={handleInquire}
+                onSelect={(it) => {
+                  setSelectedProduct(it);
+                  setIsDetailsModalOpen(true);
+                }}
+              />
+            ))}
+          </div>
+        )}
 
         {/* Subdued Bottom Note */}
         <div className="mt-8 sm:mt-10 text-center text-xs text-neutral-500 max-w-md mx-auto px-2">
