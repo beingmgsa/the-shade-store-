@@ -170,7 +170,7 @@ function getProducts(): GlassesProduct[] {
     }
     const data = fs.readFileSync(PRODUCTS_FILE, 'utf-8');
     const parsed: GlassesProduct[] = JSON.parse(data);
-    if (!Array.isArray(parsed) || parsed.length === 0) {
+    if (!Array.isArray(parsed)) {
       fs.writeFileSync(PRODUCTS_FILE, JSON.stringify(DEFAULT_PRODUCTS, null, 2), 'utf-8');
       return DEFAULT_PRODUCTS;
     }

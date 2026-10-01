@@ -122,7 +122,7 @@ const DATA_FILE = path.resolve(process.cwd(), 'data', 'products.json');
 const TMP_FILE = path.resolve('/tmp', 'the_shade_store_products.json');
 
 export function getProducts(): GlassesProduct[] {
-  if (memoryProducts && memoryProducts.length > 0) {
+  if (memoryProducts !== null) {
     return memoryProducts;
   }
 
@@ -131,7 +131,7 @@ export function getProducts(): GlassesProduct[] {
     if (fs.existsSync(TMP_FILE)) {
       const content = fs.readFileSync(TMP_FILE, 'utf-8');
       const parsed = JSON.parse(content);
-      if (Array.isArray(parsed) && parsed.length > 0) {
+      if (Array.isArray(parsed)) {
         memoryProducts = parsed;
         return parsed;
       }
@@ -145,7 +145,7 @@ export function getProducts(): GlassesProduct[] {
     if (fs.existsSync(DATA_FILE)) {
       const content = fs.readFileSync(DATA_FILE, 'utf-8');
       const parsed = JSON.parse(content);
-      if (Array.isArray(parsed) && parsed.length > 0) {
+      if (Array.isArray(parsed)) {
         memoryProducts = parsed.map((item) => ({
           ...item,
           image: normalizeProductImage(item.image),

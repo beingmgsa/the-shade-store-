@@ -70,21 +70,29 @@ export async function getProductsWithFallback(): Promise<{
     const productsRef = collection(db, 'products');
     const snapshot = await getDocs(productsRef);
     
-    if (!snapshot.empty) {
-      const items: GlassesProduct[] = [];
-      snapshot.forEach((docSnap) => {
-        items.push(normalizeProductDoc(docSnap.id, docSnap.data()));
-      });
+    // Firestore is enabled and returned query result
+    const items: GlassesProduct[] = [];
+    snapshot.forEach((docSnap) => {
+      items.push(normalizeProductDoc(docSnap.id, docSnap.data()));
+    });
 
-      // Sort by createdAt descending
+    // If Firestore has documents, return them
+    if (items.length > 0) {
       items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
       return {
         products: items,
         source: 'firestore',
         firebaseStatus: { status: 'connected' },
       };
     }
+
+    // If Firestore collection is explicitly empty (all products deleted by owner),
+    // return the empty array so deletions persist!
+    return {
+      products: [],
+      source: 'firestore',
+      firebaseStatus: { status: 'connected' },
+    };
   } catch (err: any) {
     console.warn('Firestore fetch products notice:', err);
     const msg = err?.message || String(err);
@@ -108,9 +116,9 @@ export async function getProductsWithFallback(): Promise<{
       });
       if (res.ok) {
         const data = await res.json();
-        if (Array.isArray(data) && data.length > 0) {
+        if (Array.isArray(data)) {
           return {
-            products: data.map((d) => normalizeProductDoc(d.id, d)),
+            products: data.map((d: any) => normalizeProductDoc(d.id, d)),
             source: 'api',
             firebaseStatus: status,
           };
@@ -137,7 +145,7 @@ export async function getProductsWithFallback(): Promise<{
       const data = await res.json();
       if (Array.isArray(data) && data.length > 0) {
         return {
-          products: data.map((d) => normalizeProductDoc(d.id, d)),
+          products: data.map((d: any) => normalizeProductDoc(d.id, d)),
           source: 'api',
           firebaseStatus: { status: 'connected' },
         };
@@ -209,10 +217,15 @@ export async function saveProductToFirebase(product: GlassesProduct, authToken?:
 export async function deleteProductFromFirebase(productId: string, authToken?: string): Promise<{
   firestoreSuccess: boolean;
   firestoreError?: string;
+  apiSuccess?: boolean;
+  apiError?: string;
 }> {
   let firestoreSuccess = false;
   let firestoreError: string | undefined;
+  let apiSuccess = false;
+  let apiError: string | undefined;
 
+  // 1. Delete from Firestore database
   try {
     const docRef = doc(db, 'products', productId);
     await deleteDoc(docRef);
@@ -222,9 +235,9 @@ export async function deleteProductFromFirebase(productId: string, authToken?: s
     firestoreError = err?.message || String(err);
   }
 
+  // 2. Delete from Backend API cache
   try {
     if (authToken) {
-      // First try query parameter on /api/admin/products, then route param
       const res = await fetch(`/api/admin/products?id=${encodeURIComponent(productId)}`, {
         method: 'DELETE',
         headers: {
@@ -232,21 +245,32 @@ export async function deleteProductFromFirebase(productId: string, authToken?: s
           Authorization: `Bearer ${authToken}`,
         },
       });
-      if (!res.ok) {
-        await fetch(`/api/admin/products/${encodeURIComponent(productId)}`, {
+
+      if (res.ok) {
+        apiSuccess = true;
+      } else {
+        // Fallback to route param /api/admin/products/:id
+        const fallbackRes = await fetch(`/api/admin/products/${encodeURIComponent(productId)}`, {
           method: 'DELETE',
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${authToken}`,
           },
         });
+        if (fallbackRes.ok) {
+          apiSuccess = true;
+        } else {
+          const errData = await fallbackRes.json().catch(() => null);
+          apiError = errData?.error || `API delete failed with status ${fallbackRes.status}`;
+        }
       }
     }
-  } catch (apiErr) {
+  } catch (apiErr: any) {
     console.warn('Backend API sync delete error:', apiErr);
+    apiError = apiErr?.message || 'Network error deleting from backend API';
   }
 
-  return { firestoreSuccess, firestoreError };
+  return { firestoreSuccess, firestoreError, apiSuccess, apiError };
 }
 
 /**

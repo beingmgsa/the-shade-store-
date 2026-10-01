@@ -270,7 +270,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
     // Realtime Firestore product subscription
     const unsubscribeProducts = subscribeToProducts(
       (live) => {
-        if (Array.isArray(live) && live.length > 0) {
+        if (Array.isArray(live)) {
           setProducts(live);
         }
       },
@@ -541,20 +541,36 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
     }
   };
 
-  // Delete Product
+  // Delete Product with real database verification
   const handleDeleteProduct = async () => {
     if (!currentUser || !isOwner || !deleteConfirmProduct) return;
 
+    const targetProduct = deleteConfirmProduct;
     setIsSubmitting(true);
     try {
       const token = await currentUser.getIdToken();
-      await deleteProductFromFirebase(deleteConfirmProduct.id, token);
-      await fetchProducts();
-      window.dispatchEvent(new CustomEvent('the-shade-store:products-updated'));
-      showToast(`"${deleteConfirmProduct.name}" permanently deleted`);
+      const result = await deleteProductFromFirebase(targetProduct.id, token);
+
+      if (!result.firestoreSuccess && !result.apiSuccess) {
+        const errorDetail = result.firestoreError || result.apiError || 'Unknown database error';
+        showToast(`Failed to delete frame: ${errorDetail}`, 'error');
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Optimistically update admin state immediately
+      setProducts((prev) => prev.filter((p) => p.id !== targetProduct.id));
       setDeleteConfirmProduct(null);
-    } catch {
-      showToast('Error deleting product', 'error');
+
+      // Re-fetch to sync with persistent database
+      await fetchProducts();
+
+      // Dispatch event to update customer-facing store
+      window.dispatchEvent(new CustomEvent('the-shade-store:products-updated'));
+      showToast(`"${targetProduct.name}" permanently deleted from catalog`);
+    } catch (err: any) {
+      console.error('Delete error:', err);
+      showToast(err?.message || 'Error deleting product from database', 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -1989,9 +2005,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
                 type="button"
                 onClick={handleDeleteProduct}
                 disabled={isSubmitting}
-                className="px-4 py-2 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 rounded-xl shadow-xs"
+                className="px-4 py-2 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 disabled:opacity-60 rounded-xl shadow-xs inline-flex items-center gap-1.5 cursor-pointer"
               >
-                Delete Frame
+                {isSubmitting ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-white" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <span>Delete Frame</span>
+                )}
               </button>
             </div>
           </div>
