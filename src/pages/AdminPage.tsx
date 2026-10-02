@@ -75,6 +75,34 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
     return authContextLoading;
   });
 
+  // Synchronize with AuthContext state
+  useEffect(() => {
+    if (!authContextLoading) {
+      if (authUser) {
+        const email = (authUser.email || '').toLowerCase().trim();
+        if (email === OWNER_EMAIL.toLowerCase().trim()) {
+          setCurrentUser(authUser);
+          setIsOwner(true);
+          setAuthLoading(false);
+        } else {
+          // Authenticated as non-owner (customer)
+          setCurrentUser(null);
+          setIsOwner(false);
+          setAuthLoading(false);
+          if (onBackToStore) {
+            onBackToStore();
+          } else if (typeof window !== 'undefined') {
+            window.location.href = '/';
+          }
+        }
+      } else {
+        setCurrentUser(null);
+        setIsOwner(false);
+        setAuthLoading(false);
+      }
+    }
+  }, [authUser, authContextLoading, onBackToStore]);
+
   // Form states
   const [emailInput, setEmailInput] = useState<string>('');
   const [passwordInput, setPasswordInput] = useState<string>('');
@@ -341,12 +369,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
           }
           await checkCloudinaryStatus(user);
         } else {
-          // A customer or unauthorized user signed in
+          // A customer or non-owner user navigated to /admin
           setCurrentUser(null);
           setIsOwner(false);
           setAuthLoading(false);
-          await signOut(auth);
-          setAuthError('Access Denied: You do not have administrative privileges.');
+          // Return non-owner customer directly to the public storefront
+          if (onBackToStore) {
+            onBackToStore();
+          } else if (typeof window !== 'undefined') {
+            window.location.href = '/';
+          }
         }
       } else {
         setCurrentUser(null);

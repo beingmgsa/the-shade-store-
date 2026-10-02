@@ -31,7 +31,17 @@ export const UserMenu: React.FC<UserMenuProps> = ({ onOpenAuth, onOpenAdmin }) =
   }
 
   if (!user) {
-    return null;
+    return (
+      <button
+        onClick={() => onOpenAuth('signin')}
+        type="button"
+        className="min-h-[36px] sm:min-h-[38px] px-3 sm:px-3.5 py-1.5 inline-flex items-center gap-1.5 rounded-lg border border-neutral-300 hover:border-neutral-900 bg-white hover:bg-neutral-50 active:bg-neutral-100 text-neutral-900 text-xs sm:text-sm font-medium transition-colors shadow-2xs cursor-pointer"
+        title="Account Sign In"
+      >
+        <UserIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-neutral-700 shrink-0" />
+        <span className="whitespace-nowrap font-medium">Login</span>
+      </button>
+    );
   }
 
   // Check if current logged-in user is the store owner

@@ -53,9 +53,11 @@ export default function App() {
 
   // If a non-owner user attempts to directly open /admin while signed in, return them to public storefront
   useEffect(() => {
-    if (!authLoading && user && !isOwner && isAdminRoute) {
-      setIsAdminRoute(false);
-      window.history.replaceState({}, '', '/');
+    if (!authLoading) {
+      if (isAdminRoute && user && !isOwner) {
+        setIsAdminRoute(false);
+        window.history.replaceState({}, '', '/');
+      }
     }
   }, [authLoading, user, isOwner, isAdminRoute]);
 
@@ -110,6 +112,23 @@ export default function App() {
 
   // Render Admin Portal if visiting /admin
   if (isAdminRoute) {
+    if (authLoading) {
+      return (
+        <div className="min-h-screen bg-[#FAF9F6] flex flex-col items-center justify-center p-4 text-center">
+          <div className="w-10 h-10 rounded-xl bg-neutral-900 text-white flex items-center justify-center mb-3 shadow-xs animate-pulse">
+            <Shield className="w-5 h-5 text-emerald-400" />
+          </div>
+          <p className="font-serif text-xl font-semibold text-neutral-900">The Shade Store Admin</p>
+          <p className="text-xs text-neutral-500 mt-1">Verifying access...</p>
+        </div>
+      );
+    }
+
+    if (user && !isOwner) {
+      // Non-owner authenticated user visited /admin directly - do not show admin panel
+      return null;
+    }
+
     return (
       <React.Suspense fallback={
         <div className="min-h-screen bg-[#FAF9F6] flex flex-col items-center justify-center p-4 text-center">
@@ -502,9 +521,9 @@ export default function App() {
                   <button
                     onClick={() => handleOpenAuth('signin')}
                     className="text-[11px] text-neutral-600 hover:text-neutral-400 transition-colors cursor-pointer"
-                    title="Owner Login"
+                    title="Account Sign In"
                   >
-                    Owner Login
+                    Sign In
                   </button>
                 )}
               </div>

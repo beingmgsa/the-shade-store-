@@ -14,9 +14,9 @@ import { auth } from '../firebase/config';
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  signInWithGoogle: () => Promise<void>;
-  signInWithEmail: (email: string, password: string) => Promise<void>;
-  signUpWithEmail: (email: string, password: string, name?: string) => Promise<void>;
+  signInWithGoogle: () => Promise<User>;
+  signInWithEmail: (email: string, password: string) => Promise<User>;
+  signUpWithEmail: (email: string, password: string, name?: string) => Promise<User>;
   logout: () => Promise<void>;
 }
 
@@ -35,24 +35,32 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return () => unsubscribe();
   }, []);
 
-  const signInWithGoogle = async () => {
+  const signInWithGoogle = async (): Promise<User> => {
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
-    await signInWithPopup(auth, provider);
+    const cred = await signInWithPopup(auth, provider);
+    setUser(cred.user);
+    return cred.user;
   };
 
-  const signInWithEmail = async (email: string, password: string) => {
-    await signInWithEmailAndPassword(auth, email.trim(), password);
+  const signInWithEmail = async (email: string, password: string): Promise<User> => {
+    const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+    setUser(cred.user);
+    return cred.user;
   };
 
-  const signUpWithEmail = async (email: string, password: string, name?: string) => {
+  const signUpWithEmail = async (email: string, password: string, name?: string): Promise<User> => {
     const userCredential = await createUserWithEmailAndPassword(auth, email.trim(), password);
     if (name && name.trim() && userCredential.user) {
       await updateProfile(userCredential.user, {
         displayName: name.trim()
       });
-      setUser({ ...userCredential.user, displayName: name.trim() });
+      const updatedUser = { ...userCredential.user, displayName: name.trim() } as User;
+      setUser(updatedUser);
+      return updatedUser;
     }
+    setUser(userCredential.user);
+    return userCredential.user;
   };
 
   const logout = async () => {
