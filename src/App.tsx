@@ -27,7 +27,7 @@ const AdminPage = React.lazy(() => import('./pages/AdminPage').then(m => ({ defa
 const OWNER_EMAIL = 'beingmagrajwork@gmail.com';
 
 export default function App() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const isOwner = user?.email?.toLowerCase().trim() === OWNER_EMAIL.toLowerCase();
 
   const [isAdminRoute, setIsAdminRoute] = useState(() => {
@@ -50,6 +50,14 @@ export default function App() {
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
+
+  // If a non-owner user attempts to directly open /admin while signed in, return them to public storefront
+  useEffect(() => {
+    if (!authLoading && user && !isOwner && isAdminRoute) {
+      setIsAdminRoute(false);
+      window.history.replaceState({}, '', '/');
+    }
+  }, [authLoading, user, isOwner, isAdminRoute]);
 
   // Fetch live products from Firebase Firestore (with API & static catalog fallback)
   const fetchLiveProducts = async () => {
@@ -488,7 +496,18 @@ export default function App() {
             {/* Copyright & Location Line */}
             <div className="mt-8 pt-5 border-t border-neutral-900 text-xs text-neutral-500 flex flex-col sm:flex-row items-center justify-between gap-2 text-center sm:text-left">
               <span>© {new Date().getFullYear()} {SHOP_INFO.name}. All rights reserved.</span>
-              <span>Pur Road, Bhilwara, Rajasthan 311001</span>
+              <div className="flex items-center gap-4">
+                <span>Pur Road, Bhilwara, Rajasthan 311001</span>
+                {!user && (
+                  <button
+                    onClick={() => handleOpenAuth('signin')}
+                    className="text-[11px] text-neutral-600 hover:text-neutral-400 transition-colors cursor-pointer"
+                    title="Owner Login"
+                  >
+                    Owner Login
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>

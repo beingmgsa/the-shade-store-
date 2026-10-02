@@ -16,7 +16,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 }) => {
   const { signInWithEmail } = useAuth();
   
-  const [email, setEmail] = useState(OWNER_EMAIL);
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -26,7 +26,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   useEffect(() => {
     setErrorMessage(null);
     setSuccessMessage(null);
-    setEmail(OWNER_EMAIL);
+    setEmail('');
     setPassword('');
   }, [isOpen]);
 
@@ -51,11 +51,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           return 'Please enter a valid email address.';
         case 'auth/wrong-password':
         case 'auth/invalid-credential':
-          return 'Incorrect email or password. Please verify your credentials.';
+        case 'auth/user-not-found':
+          return 'Invalid credentials. Access denied.';
         case 'auth/user-disabled':
-          return 'This owner account has been disabled.';
+          return 'This account has been disabled.';
         case 'auth/network-request-failed':
-          return 'Network error. Please check your internet connection and try again.';
+          return 'Network error. Please check your internet connection.';
         default:
           return (error as { message?: string }).message || 'Authentication error. Please try again.';
       }
@@ -69,13 +70,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setSuccessMessage(null);
 
     const trimmedEmail = email.trim().toLowerCase();
+    if (!trimmedEmail) {
+      setErrorMessage('Please enter your email.');
+      return;
+    }
+
     if (trimmedEmail !== OWNER_EMAIL.toLowerCase()) {
-      setErrorMessage(`Access Restricted: Only the verified owner (${OWNER_EMAIL}) may sign in.`);
+      setErrorMessage('Access denied. This portal is restricted to authorized store administration.');
       return;
     }
 
     if (!password) {
-      setErrorMessage('Please enter your admin password.');
+      setErrorMessage('Please enter your password.');
       return;
     }
 
@@ -83,7 +89,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     try {
       await signInWithEmail(trimmedEmail, password);
-      setSuccessMessage('Owner authenticated successfully! Accessing portal...');
+      setSuccessMessage('Owner authenticated successfully. Opening admin panel...');
       setTimeout(() => {
         onClose();
         // Redirect to admin panel
@@ -91,7 +97,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           window.history.pushState({}, '', '/admin');
           window.dispatchEvent(new PopStateEvent('popstate'));
         }
-      }, 700);
+      }, 600);
     } catch (err) {
       setErrorMessage(formatFirebaseError(err));
     } finally {
@@ -156,9 +162,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           )}
 
           <div className="mb-4 p-3 bg-neutral-100/70 rounded-xl border border-neutral-200/70 text-xs text-neutral-600">
-            <p className="font-medium text-neutral-900 mb-0.5">Admin Security Policy</p>
+            <p className="font-medium text-neutral-900 mb-0.5">Admin Security Portal</p>
             <p className="text-[11px] leading-relaxed">
-              Public user registration is disabled. Only the designated store owner email is authorized to access catalog management.
+              Authorized store administration sign in.
             </p>
           </div>
 
@@ -166,13 +172,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           <form onSubmit={handleSubmit} className="space-y-3.5">
             <div>
               <label className="block text-xs font-semibold text-neutral-800 mb-1">
-                Owner Email Address
+                Owner Email
               </label>
               <input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="beingmagrajwork@gmail.com"
+                placeholder="name@example.com"
                 className="w-full px-3.5 py-2.5 bg-white border border-neutral-300 rounded-xl text-sm text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-neutral-900/10 focus:border-neutral-900 transition-colors"
                 disabled={isLoading}
                 autoComplete="email"
@@ -189,7 +195,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter your Firebase owner password"
+                  placeholder="Enter your password"
                   className="w-full px-3.5 py-2.5 pr-10 bg-white border border-neutral-300 rounded-xl text-sm text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-neutral-900/10 focus:border-neutral-900 transition-colors"
                   disabled={isLoading}
                   autoComplete="current-password"

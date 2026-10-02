@@ -31,17 +31,7 @@ export const UserMenu: React.FC<UserMenuProps> = ({ onOpenAuth, onOpenAdmin }) =
   }
 
   if (!user) {
-    return (
-      <button
-        onClick={() => onOpenAuth('signin')}
-        type="button"
-        className="min-h-[38px] sm:min-h-[40px] px-2.5 sm:px-3.5 py-1.5 inline-flex items-center gap-1.5 rounded-lg border border-neutral-300 hover:border-neutral-900 bg-white hover:bg-neutral-50 text-neutral-900 text-xs sm:text-sm font-medium transition-colors shadow-2xs cursor-pointer"
-        title="Owner Login"
-      >
-        <Shield className="w-3.5 h-3.5 text-neutral-600 shrink-0" />
-        <span className="whitespace-nowrap">Owner Login</span>
-      </button>
-    );
+    return null;
   }
 
   // Check if current logged-in user is the store owner
@@ -93,7 +83,7 @@ export const UserMenu: React.FC<UserMenuProps> = ({ onOpenAuth, onOpenAdmin }) =
               </p>
               {isOwner && (
                 <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-neutral-900 text-emerald-400">
-                  ADMIN
+                  OWNER
                 </span>
               )}
             </div>
@@ -102,8 +92,8 @@ export const UserMenu: React.FC<UserMenuProps> = ({ onOpenAuth, onOpenAdmin }) =
                 {user.email}
               </p>
             )}
-            <div className="mt-2 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 text-[10px] font-medium text-emerald-700 border border-emerald-200/60">
-              <Check className="w-2.5 h-2.5" />
+            <div className="mt-2 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-neutral-50 text-[10px] font-medium text-neutral-700 border border-neutral-200/60">
+              <Check className="w-2.5 h-2.5 text-emerald-600" />
               <span>{isOwner ? 'Verified Store Owner' : 'Signed In'}</span>
             </div>
           </div>

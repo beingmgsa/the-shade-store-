@@ -57,7 +57,7 @@ export function verifyFirebaseOwnerToken(token: string): { valid: boolean; email
   if (!email || email !== OWNER_EMAIL) {
     return {
       valid: false,
-      error: `Access Denied: Only the store owner (${OWNER_EMAIL}) has admin privileges.`
+      error: 'Forbidden: Access denied. Administrative privileges required.'
     };
   }
 

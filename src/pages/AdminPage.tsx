@@ -76,7 +76,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
   });
 
   // Form states
-  const [emailInput, setEmailInput] = useState<string>(OWNER_EMAIL);
+  const [emailInput, setEmailInput] = useState<string>('');
   const [passwordInput, setPasswordInput] = useState<string>('');
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [isFirstTimeSetup, setIsFirstTimeSetup] = useState<boolean>(false);
@@ -346,7 +346,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
           setIsOwner(false);
           setAuthLoading(false);
           await signOut(auth);
-          setAuthError(`Access Denied: Only the store owner (${OWNER_EMAIL}) has administrative privileges.`);
+          setAuthError('Access Denied: You do not have administrative privileges.');
         }
       } else {
         setCurrentUser(null);
@@ -389,8 +389,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
     setAuthSuccess(null);
 
     const email = emailInput.trim().toLowerCase();
+    if (!email) {
+      setAuthError('Please enter your email address.');
+      return;
+    }
+
     if (email !== OWNER_EMAIL.toLowerCase()) {
-      setAuthError(`Only the registered store owner email (${OWNER_EMAIL}) can access this panel.`);
+      setAuthError('Access denied: Unauthorized account.');
       return;
     }
 
@@ -414,7 +419,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
         const credential = await signInWithEmailAndPassword(auth, email, passwordInput);
         if (credential.user) {
           setPasswordInput('');
-          showToast(`Welcome back, ${OWNER_EMAIL}!`);
+          showToast('Welcome back to the store manager!');
         }
       }
     } catch (err: any) {
@@ -428,9 +433,15 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
   const handleForgotPassword = async () => {
     setAuthError(null);
     setAuthSuccess(null);
+    const targetEmail = emailInput.trim().toLowerCase() || OWNER_EMAIL;
+    if (targetEmail !== OWNER_EMAIL.toLowerCase()) {
+      setAuthError('Password reset is only available for the designated store owner.');
+      return;
+    }
+
     try {
-      await sendPasswordResetEmail(auth, OWNER_EMAIL);
-      setAuthSuccess(`Password reset email sent to ${OWNER_EMAIL}! Check your inbox to set a new password.`);
+      await sendPasswordResetEmail(auth, targetEmail);
+      setAuthSuccess('Password reset link sent! Check your inbox to set a new password.');
     } catch (err: any) {
       setAuthError(formatFirebaseError(err));
     }
@@ -719,7 +730,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
             </div>
 
             <p className="mt-1.5 text-xs sm:text-sm text-neutral-600">
-              Sign in with your verified owner account (<code>{OWNER_EMAIL}</code>) to manage your glasses catalog.
+              Sign in with your verified owner account credentials to manage the glasses catalog.
             </p>
 
             {/* Error Message */}
@@ -741,21 +752,19 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
             <form onSubmit={handleSignIn} className="mt-6 space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-neutral-800 mb-1">
-                  Owner Email
+                  Email Address
                 </label>
                 <div className="relative">
                   <input
                     type="email"
                     value={emailInput}
                     onChange={(e) => setEmailInput(e.target.value)}
+                    placeholder="Enter owner email"
                     className="w-full px-3.5 py-2.5 bg-neutral-50 border border-neutral-300 rounded-xl text-sm font-medium text-neutral-900 focus:outline-none focus:ring-2 focus:ring-neutral-900/10 focus:border-neutral-900"
                     required
                   />
                   <Mail className="w-4 h-4 text-neutral-400 absolute right-3 top-1/2 -translate-y-1/2" />
                 </div>
-                <span className="text-[11px] text-neutral-500 mt-1 block">
-                  Only <code>{OWNER_EMAIL}</code> has administrative privileges.
-                </span>
               </div>
 
               <div>
