@@ -13,7 +13,7 @@ import {
   Shield
 } from 'lucide-react';
 import { SHOP_INFO, GlassesItem } from './data/glassesCatalog';
-import { getProductsWithFallback, subscribeToProducts, GlassesProduct } from './firebase/productsService';
+import { getProductsWithFallback, subscribeToProducts, getLocalProducts, GlassesProduct } from './firebase/productsService';
 import { ProductCard } from './components/ProductCard';
 import { UserMenu } from './components/UserMenu';
 import { AuthModal } from './components/AuthModal';
@@ -37,8 +37,16 @@ export default function App() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authModalMode, setAuthModalMode] = useState<'signin' | 'signup'>('signin');
-  const [catalogItems, setCatalogItems] = useState<GlassesItem[]>([]);
-  const [catalogLoading, setCatalogLoading] = useState<boolean>(true);
+  
+  // Synchronously initialize from local storage cache so products NEVER disappear on refresh!
+  const [catalogItems, setCatalogItems] = useState<GlassesItem[]>(() => {
+    const cached = getLocalProducts();
+    return cached.filter((item) => item.available !== false);
+  });
+  const [catalogLoading, setCatalogLoading] = useState<boolean>(() => {
+    const cached = getLocalProducts();
+    return cached.length === 0;
+  });
 
   // Selected product state for tap-to-view details modal
   const [selectedProduct, setSelectedProduct] = useState<GlassesItem | null>(null);

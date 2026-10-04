@@ -42,6 +42,7 @@ import {
   saveProductToFirebase, 
   deleteProductFromFirebase, 
   subscribeToProducts, 
+  getLocalProducts,
   FirebaseSyncStatus, 
   FIRESTORE_ENABLE_URL,
   GlassesProduct 
@@ -112,8 +113,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
   const [authSuccess, setAuthSuccess] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
-  // Products state
-  const [products, setProducts] = useState<GlassesProduct[]>([]);
+  // Products state (synchronously loaded from persistent cache so page refresh never loses added products!)
+  const [products, setProducts] = useState<GlassesProduct[]>(() => getLocalProducts());
   const [activeTab, setActiveTab] = useState<'catalog' | 'add' | 'cloudinary' | 'preview' | 'setup'>('catalog');
 
   // Modal / Editing states
@@ -215,7 +216,94 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
     }
   };
 
-  // Upload image to Cloudinary using signed signature and in-browser compression
+  // Helper to upload a single image to Cloudinary
+  const uploadSingleFileCore = async (
+    file: File, 
+    progressPrefix: string = ''
+  ): Promise<string> => {
+    // Step 1: Optimize and compress smartphone photos in browser
+    setUploadProgress(`${progressPrefix}Optimizing ${file.name} for web...`);
+    const optimizedFile = await compressProductImage(file, {
+      maxWidth: 1600,
+      maxHeight: 1600,
+      quality: 0.88,
+    });
+
+    // Step 2: Request signed credentials from server
+    setUploadProgress(`${progressPrefix}Requesting secure signature from server...`);
+    const token = await currentUser!.getIdToken();
+    const signRes = await fetch('/api/admin/cloudinary-sign', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    const signData = await safeParseResponse(signRes, 'Upload Signer (/api/admin/cloudinary-sign)');
+    
+    if (!signRes.ok) {
+      if (signData.missing && Array.isArray(signData.missing) && signData.missing.length > 0) {
+        throw new Error(`Cloudinary setup required: Missing ${signData.missing.join(', ')} in hosting settings/secrets.`);
+      }
+      throw new Error(signData.error || `Upload signing failed with HTTP status ${signRes.status}`);
+    }
+
+    if (!signData.signature || !signData.apiKey || !signData.cloudName) {
+      throw new Error('Incomplete signature received from server.');
+    }
+
+    // Step 3: Perform upload with real progress tracking using XMLHttpRequest
+    setUploadProgress(`${progressPrefix}Uploading ${file.name} to Cloudinary...`);
+
+    const formData = new FormData();
+    formData.append('file', optimizedFile);
+    formData.append('api_key', signData.apiKey);
+    formData.append('timestamp', String(signData.timestamp));
+    formData.append('signature', signData.signature);
+    formData.append('folder', signData.folder || 'the_shade_store/products');
+
+    const uploadUrl = `https://api.cloudinary.com/v1_1/${signData.cloudName}/image/upload`;
+
+    const uploadResult = await new Promise<{ secure_url?: string; error?: { message: string } }>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', uploadUrl);
+
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          const percent = Math.round((event.loaded / event.total) * 100);
+          setUploadProgress(`${progressPrefix}Uploading ${file.name} (${percent}%)...`);
+        }
+      };
+
+      xhr.onload = () => {
+        try {
+          const parsed = JSON.parse(xhr.responseText);
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve(parsed);
+          } else {
+            reject(new Error(parsed?.error?.message || `Cloudinary rejected upload with status ${xhr.status}`));
+          }
+        } catch {
+          reject(new Error(`Invalid response from Cloudinary (status ${xhr.status})`));
+        }
+      };
+
+      xhr.onerror = () => {
+        reject(new Error('Network error uploading to Cloudinary CDN. Please check connection.'));
+      };
+
+      xhr.send(formData);
+    });
+
+    if (!uploadResult.secure_url || typeof uploadResult.secure_url !== 'string' || !uploadResult.secure_url.startsWith('http')) {
+      throw new Error('Cloudinary response did not return a valid permanent image URL');
+    }
+
+    return uploadResult.secure_url;
+  };
+
+  // Upload single image to Cloudinary using signed signature
   const uploadToCloudinary = async (file: File, showSuccessToast: boolean = true): Promise<string | null> => {
     if (!currentUser || !isOwner) {
       showToast('Admin authentication required', 'error');
@@ -235,89 +323,11 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
     setIsUploadingImage(true);
 
     try {
-      // Step 1: Optimize and compress smartphone photos in browser to speed up network upload by 5x-10x
-      setUploadProgress(`Optimizing ${file.name} for web...`);
-      const optimizedFile = await compressProductImage(file, {
-        maxWidth: 1600,
-        maxHeight: 1600,
-        quality: 0.88,
-      });
-
-      // Step 2: Request signed credentials from server
-      setUploadProgress('Requesting secure signature from server...');
-      const token = await currentUser.getIdToken();
-      const signRes = await fetch('/api/admin/cloudinary-sign', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      const signData = await safeParseResponse(signRes, 'Upload Signer (/api/admin/cloudinary-sign)');
-      
-      if (!signRes.ok) {
-        if (signData.missing && Array.isArray(signData.missing) && signData.missing.length > 0) {
-          throw new Error(`Cloudinary setup required: Missing ${signData.missing.join(', ')} in hosting settings/secrets.`);
-        }
-        throw new Error(signData.error || `Upload signing failed with HTTP status ${signRes.status}`);
-      }
-
-      if (!signData.signature || !signData.apiKey || !signData.cloudName) {
-        throw new Error('Incomplete signature received from server.');
-      }
-
-      // Step 3: Perform upload with real progress tracking using XMLHttpRequest
-      setUploadProgress(`Uploading ${file.name} to Cloudinary...`);
-
-      const formData = new FormData();
-      formData.append('file', optimizedFile);
-      formData.append('api_key', signData.apiKey);
-      formData.append('timestamp', String(signData.timestamp));
-      formData.append('signature', signData.signature);
-      formData.append('folder', signData.folder || 'the_shade_store/products');
-
-      const uploadUrl = `https://api.cloudinary.com/v1_1/${signData.cloudName}/image/upload`;
-
-      const uploadResult = await new Promise<{ secure_url?: string; error?: { message: string } }>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open('POST', uploadUrl);
-
-        xhr.upload.onprogress = (event) => {
-          if (event.lengthComputable) {
-            const percent = Math.round((event.loaded / event.total) * 100);
-            setUploadProgress(`Uploading ${file.name} (${percent}%)...`);
-          }
-        };
-
-        xhr.onload = () => {
-          try {
-            const parsed = JSON.parse(xhr.responseText);
-            if (xhr.status >= 200 && xhr.status < 300) {
-              resolve(parsed);
-            } else {
-              reject(new Error(parsed?.error?.message || `Cloudinary rejected upload with status ${xhr.status}`));
-            }
-          } catch {
-            reject(new Error(`Invalid response from Cloudinary (status ${xhr.status})`));
-          }
-        };
-
-        xhr.onerror = () => {
-          reject(new Error('Network error uploading to Cloudinary CDN. Please check connection.'));
-        };
-
-        xhr.send(formData);
-      });
-
-      if (!uploadResult.secure_url || typeof uploadResult.secure_url !== 'string' || !uploadResult.secure_url.startsWith('http')) {
-        throw new Error('Cloudinary response did not return a valid permanent image URL');
-      }
-
+      const url = await uploadSingleFileCore(file);
       if (showSuccessToast) {
         showToast('Photo uploaded to Cloudinary CDN successfully!');
       }
-      return uploadResult.secure_url;
+      return url;
     } catch (err: any) {
       console.error('Image upload failed:', err);
       showToast(err.message || 'Image upload failed', 'error');
@@ -330,8 +340,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
 
   // Upload multiple images sequentially with progress counter
   const uploadMultipleToCloudinary = async (files: FileList | File[]): Promise<string[]> => {
-    const fileArray = Array.from(files);
-    if (fileArray.length === 0) return [];
+    if (!currentUser || !isOwner) {
+      showToast('Admin authentication required', 'error');
+      return [];
+    }
+
+    const fileArray = Array.from(files).filter(f => f.type.startsWith('image/'));
+    if (fileArray.length === 0) {
+      showToast('No valid image files selected', 'error');
+      return [];
+    }
 
     setIsUploadingImage(true);
     const uploadedUrls: string[] = [];
@@ -339,10 +357,15 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
     try {
       for (let i = 0; i < fileArray.length; i++) {
         const f = fileArray[i];
-        setUploadProgress(`Uploading photo ${i + 1} of ${fileArray.length} (${f.name})...`);
-        const url = await uploadToCloudinary(f, false);
-        if (url) {
-          uploadedUrls.push(url);
+        const prefix = fileArray.length > 1 ? `[${i + 1}/${fileArray.length}] ` : '';
+        try {
+          const url = await uploadSingleFileCore(f, prefix);
+          if (url) {
+            uploadedUrls.push(url);
+          }
+        } catch (fileErr: any) {
+          console.error(`Failed to upload ${f.name}:`, fileErr);
+          showToast(`Error on ${f.name}: ${fileErr.message}`, 'error');
         }
       }
       if (uploadedUrls.length > 0) {
@@ -356,11 +379,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
     return uploadedUrls;
   };
 
-  // Fetch products from Firebase Firestore (with API & static fallback)
+  // Fetch products from Firebase Firestore / Backend / Cache
   const fetchProducts = async () => {
     try {
       const res = await getProductsWithFallback();
-      setProducts(res.products);
+      if (Array.isArray(res.products) && res.products.length > 0) {
+        setProducts(res.products);
+      }
       setFirebaseStatus(res.firebaseStatus);
     } catch (err) {
       console.error('Failed to fetch products:', err);
@@ -1318,12 +1343,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
                           if (files && files.length > 0) {
                             const urls = await uploadMultipleToCloudinary(files);
                             if (urls.length > 0) {
-                              // If no primary image set yet, set first as primary
-                              if (!formCustomImage) {
-                                setFormCustomImage(urls[0]);
-                                setFormImage(urls[0]);
-                              }
-                              // Append to gallery
                               setFormGalleryImages((prev) => {
                                 const combined = [...prev];
                                 urls.forEach(u => {
@@ -1331,7 +1350,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
                                 });
                                 return combined;
                               });
+                              if (!formCustomImage) {
+                                setFormCustomImage(urls[0]);
+                                setFormImage(urls[0]);
+                              }
                             }
+                            // Reset input so user can choose more or re-select
+                            e.target.value = '';
                           }
                         }}
                       />
@@ -1390,7 +1415,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
                                     setFormImage(remaining[0] || PRESET_STUDIO_IMAGES[0].url);
                                   }
                                 }}
-                                className="absolute top-1 right-1 w-5 h-5 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-xs"
+                                className="absolute top-1 right-1 w-5 h-5 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center justify-center opacity-90 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shadow-xs"
                                 title="Remove photo"
                               >
                                 <X className="w-3 h-3" />
@@ -2072,6 +2097,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
                               images: existingList,
                             });
                           }
+                          // Reset input so user can choose more or re-select
+                          e.target.value = '';
                         }
                       }}
                     />
@@ -2124,7 +2151,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
                                       images: filtered,
                                     });
                                   }}
-                                  className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-red-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                                  className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-red-600 text-white flex items-center justify-center opacity-90 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
                                   title="Remove view"
                                 >
                                   <X className="w-2.5 h-2.5" />

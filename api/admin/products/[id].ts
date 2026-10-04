@@ -36,17 +36,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (req.method === 'PUT') {
     const current = products[index];
-    const { name, price, image, itemCode, description, available } = req.body || {};
+    const { name, price, image, images, itemCode, description, available } = req.body || {};
 
     const newImage = image !== undefined && typeof image === 'string' && image.trim()
       ? normalizeProductImage(image.trim())
       : current.image;
+
+    const normalizedImages: string[] = Array.isArray(images) && images.length > 0
+      ? images.map((u: any) => normalizeProductImage(String(u)))
+      : (newImage ? [newImage] : current.images || []);
 
     const updated: GlassesProduct = {
       ...current,
       name: name !== undefined && typeof name === 'string' && name.trim() ? name.trim() : current.name,
       price: price !== undefined ? (price === null || price === '' ? null : Number(price)) : current.price,
       image: newImage,
+      images: normalizedImages,
       itemCode: itemCode !== undefined && typeof itemCode === 'string' && itemCode.trim() ? itemCode.trim() : current.itemCode,
       description: description !== undefined && typeof description === 'string' ? description.trim() : current.description,
       available: available !== undefined ? Boolean(available) : current.available,

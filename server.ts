@@ -444,11 +444,16 @@ app.post('/api/admin/products', requireOwnerAuth, (req: Request, res: Response) 
   }
 });
 
-// 7. Admin Products: Update
-app.put('/api/admin/products/:id', requireOwnerAuth, (req: Request, res: Response) => {
+// 7. Admin Products: Update (support both route param and query param)
+const handleProductUpdate = (req: Request, res: Response) => {
   res.setHeader('Cache-Control', 'no-store');
-  const { id } = req.params;
-  const { name, price, image, itemCode, description, available } = req.body;
+  const id = req.params.id || (req.query.id as string) || req.body?.id;
+  const { name, price, image, images, itemCode, description, available } = req.body || {};
+
+  if (!id) {
+    res.status(400).json({ error: 'Missing product ID to update.' });
+    return;
+  }
 
   const products = getProducts();
   const index = products.findIndex((p) => p.id === id);
@@ -460,16 +465,20 @@ app.put('/api/admin/products/:id', requireOwnerAuth, (req: Request, res: Respons
 
   const current = products[index];
 
-  // Carefully preserve existing fields if only photo or specific fields were updated
   const newImage = image !== undefined && typeof image === 'string' && image.trim()
     ? normalizeProductImage(image.trim())
     : current.image;
+
+  const normalizedImages: string[] = Array.isArray(images) && images.length > 0
+    ? images.map((u: any) => normalizeProductImage(String(u)))
+    : (newImage ? [newImage] : current.images || []);
 
   const updated: GlassesProduct = {
     ...current,
     name: name !== undefined && typeof name === 'string' && name.trim() ? name.trim() : current.name,
     price: price !== undefined ? (price === null || price === '' ? null : Number(price)) : current.price,
     image: newImage,
+    images: normalizedImages,
     itemCode: itemCode !== undefined && typeof itemCode === 'string' && itemCode.trim() ? itemCode.trim() : current.itemCode,
     description: description !== undefined && typeof description === 'string' ? description.trim() : current.description,
     available: available !== undefined ? Boolean(available) : current.available,
@@ -483,12 +492,20 @@ app.put('/api/admin/products/:id', requireOwnerAuth, (req: Request, res: Respons
   } catch (err: any) {
     res.status(500).json({ error: 'Failed to update product in database: ' + (err.message || 'Server error') });
   }
-});
+};
 
-// 8. Admin Products: Delete
-app.delete('/api/admin/products/:id', requireOwnerAuth, (req: Request, res: Response) => {
+app.put('/api/admin/products/:id', requireOwnerAuth, handleProductUpdate);
+app.put('/api/admin/products', requireOwnerAuth, handleProductUpdate);
+
+// 8. Admin Products: Delete (support both route param and query param)
+const handleProductDelete = (req: Request, res: Response) => {
   res.setHeader('Cache-Control', 'no-store');
-  const { id } = req.params;
+  const id = req.params.id || (req.query.id as string) || req.body?.id;
+  if (!id) {
+    res.status(400).json({ error: 'Missing product ID to delete.' });
+    return;
+  }
+
   const products = getProducts();
   const index = products.findIndex((p) => p.id === id);
 
@@ -504,7 +521,10 @@ app.delete('/api/admin/products/:id', requireOwnerAuth, (req: Request, res: Resp
   } catch (err: any) {
     res.status(500).json({ error: 'Failed to delete product from database: ' + (err.message || 'Server error') });
   }
-});
+};
+
+app.delete('/api/admin/products/:id', requireOwnerAuth, handleProductDelete);
+app.delete('/api/admin/products', requireOwnerAuth, handleProductDelete);
 
 // 9. Admin Products: Reset to defaults
 app.post('/api/admin/products/reset', requireOwnerAuth, (_req: Request, res: Response) => {
