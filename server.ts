@@ -166,12 +166,14 @@ const DEFAULT_PRODUCTS: GlassesProduct[] = [
 function getProducts(): GlassesProduct[] {
   try {
     if (!fs.existsSync(PRODUCTS_FILE)) {
-      return [];
+      saveProducts(DEFAULT_PRODUCTS);
+      return DEFAULT_PRODUCTS;
     }
     const data = fs.readFileSync(PRODUCTS_FILE, 'utf-8');
     const parsed: GlassesProduct[] = JSON.parse(data);
-    if (!Array.isArray(parsed)) {
-      return [];
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      saveProducts(DEFAULT_PRODUCTS);
+      return DEFAULT_PRODUCTS;
     }
 
     // Auto-migrate any old /src/assets/images paths to production /images
