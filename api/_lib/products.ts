@@ -157,7 +157,7 @@ export function getProducts(): GlassesProduct[] {
     // Continue
   }
 
-  memoryProducts = [...DEFAULT_PRODUCTS];
+  memoryProducts = [];
   return memoryProducts;
 }
 

@@ -165,14 +165,12 @@ const DEFAULT_PRODUCTS: GlassesProduct[] = [
 function getProducts(): GlassesProduct[] {
   try {
     if (!fs.existsSync(PRODUCTS_FILE)) {
-      fs.writeFileSync(PRODUCTS_FILE, JSON.stringify(DEFAULT_PRODUCTS, null, 2), 'utf-8');
-      return DEFAULT_PRODUCTS;
+      return [];
     }
     const data = fs.readFileSync(PRODUCTS_FILE, 'utf-8');
     const parsed: GlassesProduct[] = JSON.parse(data);
     if (!Array.isArray(parsed)) {
-      fs.writeFileSync(PRODUCTS_FILE, JSON.stringify(DEFAULT_PRODUCTS, null, 2), 'utf-8');
-      return DEFAULT_PRODUCTS;
+      return [];
     }
 
     // Auto-migrate any old /src/assets/images paths to production /images
@@ -192,8 +190,8 @@ function getProducts(): GlassesProduct[] {
 
     return normalized;
   } catch (err) {
-    console.error('Error reading products file, returning default:', err);
-    return DEFAULT_PRODUCTS;
+    console.error('Error reading products file, returning empty:', err);
+    return [];
   }
 }
 

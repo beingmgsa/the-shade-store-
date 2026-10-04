@@ -12,7 +12,7 @@ import {
   ExternalLink,
   Shield
 } from 'lucide-react';
-import { GLASSES_CATALOG, SHOP_INFO, GlassesItem } from './data/glassesCatalog';
+import { SHOP_INFO, GlassesItem } from './data/glassesCatalog';
 import { getProductsWithFallback, subscribeToProducts, GlassesProduct } from './firebase/productsService';
 import { ProductCard } from './components/ProductCard';
 import { UserMenu } from './components/UserMenu';
@@ -37,7 +37,8 @@ export default function App() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authModalMode, setAuthModalMode] = useState<'signin' | 'signup'>('signin');
-  const [catalogItems, setCatalogItems] = useState<GlassesItem[]>(GLASSES_CATALOG);
+  const [catalogItems, setCatalogItems] = useState<GlassesItem[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState<boolean>(true);
 
   // Selected product state for tap-to-view details modal
   const [selectedProduct, setSelectedProduct] = useState<GlassesItem | null>(null);
@@ -61,7 +62,7 @@ export default function App() {
     }
   }, [authLoading, user, isOwner, isAdminRoute]);
 
-  // Fetch live products from Firebase Firestore (with API & static catalog fallback)
+  // Fetch live products from Firebase Firestore (the single source of truth)
   const fetchLiveProducts = async () => {
     try {
       const { products } = await getProductsWithFallback();
@@ -72,6 +73,8 @@ export default function App() {
       }
     } catch (err) {
       console.warn('Error fetching live products:', err);
+    } finally {
+      setCatalogLoading(false);
     }
   };
 

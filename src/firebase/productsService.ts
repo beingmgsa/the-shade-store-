@@ -10,7 +10,6 @@ import {
   Unsubscribe 
 } from 'firebase/firestore';
 import { db } from './config';
-import { GLASSES_CATALOG } from '../data/glassesCatalog';
 
 export interface GlassesProduct {
   id: string;
@@ -58,38 +57,26 @@ export function normalizeProductDoc(id: string, data: any): GlassesProduct {
 }
 
 /**
- * Fetch all products from Firestore, with graceful fallback to /api/products and initial catalog
+ * Fetch all products from Firestore as the single permanent source of truth
  */
 export async function getProductsWithFallback(): Promise<{
   products: GlassesProduct[];
-  source: 'firestore' | 'api' | 'static';
+  source: 'firestore' | 'api' | 'empty';
   firebaseStatus: FirebaseSyncStatus;
 }> {
-  // 1. Try Firestore direct read
+  // 1. Try Firestore direct read (primary and permanent store)
   try {
     const productsRef = collection(db, 'products');
     const snapshot = await getDocs(productsRef);
     
-    // Firestore is enabled and returned query result
     const items: GlassesProduct[] = [];
     snapshot.forEach((docSnap) => {
       items.push(normalizeProductDoc(docSnap.id, docSnap.data()));
     });
 
-    // If Firestore has documents, return them
-    if (items.length > 0) {
-      items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      return {
-        products: items,
-        source: 'firestore',
-        firebaseStatus: { status: 'connected' },
-      };
-    }
-
-    // If Firestore collection is explicitly empty (all products deleted by owner),
-    // return the empty array so deletions persist!
+    items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     return {
-      products: [],
+      products: items,
       source: 'firestore',
       firebaseStatus: { status: 'connected' },
     };
@@ -101,14 +88,13 @@ export async function getProductsWithFallback(): Promise<{
                        msg.includes('permission-denied') ||
                        err?.code === 'permission-denied';
 
-    // Continue to fallback, but record status
     const status: FirebaseSyncStatus = {
       status: isDisabled ? 'disabled' : 'error',
       errorDetails: msg,
       enableUrl: FIRESTORE_ENABLE_URL,
     };
 
-    // Try /api/products fallback
+    // 2. Try server API /api/products as serverless proxy fallback (which also reads saved products)
     try {
       const res = await fetch(`/api/products?t=${Date.now()}`, {
         cache: 'no-store',
@@ -125,41 +111,16 @@ export async function getProductsWithFallback(): Promise<{
         }
       }
     } catch {
-      // Continue to static
+      // Fall through to empty
     }
 
+    // Never restore hardcoded fake samples; return empty array with error status
     return {
-      products: GLASSES_CATALOG.map((g) => normalizeProductDoc(g.id, g)),
-      source: 'static',
+      products: [],
+      source: 'empty',
       firebaseStatus: status,
     };
   }
-
-  // 2. If Firestore is empty, try API or seed
-  try {
-    const res = await fetch(`/api/products?t=${Date.now()}`, {
-      cache: 'no-store',
-      headers: { 'Cache-Control': 'no-cache' },
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
-        return {
-          products: data.map((d: any) => normalizeProductDoc(d.id, d)),
-          source: 'api',
-          firebaseStatus: { status: 'connected' },
-        };
-      }
-    }
-  } catch {
-    // Continue
-  }
-
-  return {
-    products: GLASSES_CATALOG.map((g) => normalizeProductDoc(g.id, g)),
-    source: 'static',
-    firebaseStatus: { status: 'connected' },
-  };
 }
 
 /**

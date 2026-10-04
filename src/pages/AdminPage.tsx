@@ -683,27 +683,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
     }
   };
 
-  // Reset to default catalog
-  const handleResetCatalog = async () => {
-    if (!currentUser || !isOwner) return;
-    if (!window.confirm('Reset catalog to the default 8 store frames? Custom added frames will be replaced.')) return;
-
-    try {
-      const headers = await getAuthHeaders();
-      const res = await fetch('/api/admin/products/reset', {
-        method: 'POST',
-        headers,
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setProducts(data.products);
-        showToast('Catalog reset to initial 8 frames');
-      }
-    } catch {
-      showToast('Failed to reset catalog', 'error');
-    }
-  };
-
   // -------------------------------------------------------------
   // Render Loading
   // -------------------------------------------------------------
@@ -1065,102 +1044,112 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
                   <Plus className="w-3.5 h-3.5" />
                   <span>Add Frame</span>
                 </button>
-
-                <button
-                  onClick={handleResetCatalog}
-                  title="Reset to default items"
-                  className="min-h-[38px] px-2.5 py-1.5 bg-white hover:bg-neutral-50 text-neutral-600 border border-neutral-200 rounded-lg text-xs font-medium flex items-center gap-1 cursor-pointer"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Reset Defaults</span>
-                </button>
               </div>
             </div>
 
             {/* Catalog Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
-              {products.map((item) => (
-                <div 
-                  key={item.id}
-                  className={`bg-white rounded-xl border p-4 shadow-2xs flex flex-col justify-between transition-all ${
-                    item.available 
-                      ? 'border-neutral-200 hover:border-neutral-300' 
-                      : 'border-neutral-200/60 opacity-80 bg-neutral-50/70'
-                  }`}
+            {products.length === 0 ? (
+              <div className="bg-white rounded-2xl border border-neutral-200/90 p-8 sm:p-12 text-center max-w-lg mx-auto">
+                <div className="w-12 h-12 rounded-xl bg-neutral-100 flex items-center justify-center text-neutral-500 mx-auto mb-3">
+                  <Layers className="w-6 h-6" />
+                </div>
+                <h3 className="font-serif text-lg font-medium text-neutral-900">Your Catalog is Empty</h3>
+                <p className="mt-1 text-xs sm:text-sm text-neutral-600 leading-relaxed max-w-sm mx-auto">
+                  No frames are currently in your database. Click below to add your first eyewear style.
+                </p>
+                <button
+                  onClick={() => setActiveTab('add')}
+                  className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-neutral-950 hover:bg-neutral-800 text-white rounded-xl text-xs font-semibold shadow-xs transition-colors cursor-pointer"
                 >
-                  <div>
-                    {/* Top Row: Code & Availability Status */}
-                    <div className="flex items-center justify-between gap-2 mb-2.5">
-                      <span className="text-[11px] font-mono font-medium text-neutral-500 bg-neutral-100 px-2 py-0.5 rounded">
-                        {item.itemCode || 'TSS'}
-                      </span>
-                      
-                      {/* Availability Switch */}
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add First Frame</span>
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+                {products.map((item) => (
+                  <div 
+                    key={item.id}
+                    className={`bg-white rounded-xl border p-4 shadow-2xs flex flex-col justify-between transition-all ${
+                      item.available 
+                        ? 'border-neutral-200 hover:border-neutral-300' 
+                        : 'border-neutral-200/60 opacity-80 bg-neutral-50/70'
+                    }`}
+                  >
+                    <div>
+                      {/* Top Row: Code & Availability Status */}
+                      <div className="flex items-center justify-between gap-2 mb-2.5">
+                        <span className="text-[11px] font-mono font-medium text-neutral-500 bg-neutral-100 px-2 py-0.5 rounded">
+                          {item.itemCode || 'TSS'}
+                        </span>
+                        
+                        {/* Availability Switch */}
+                        <button
+                          onClick={() => handleToggleAvailability(item)}
+                          className={`text-xs px-2.5 py-1 rounded-full font-medium transition-colors cursor-pointer flex items-center gap-1 ${
+                            item.available 
+                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/80 hover:bg-emerald-100' 
+                              : 'bg-neutral-200/80 text-neutral-600 hover:bg-neutral-300'
+                          }`}
+                          title="Click to toggle availability"
+                        >
+                          <span className={`w-1.5 h-1.5 rounded-full ${item.available ? 'bg-emerald-500' : 'bg-neutral-400'}`} />
+                          <span>{item.available ? 'In Stock' : 'Out of Stock'}</span>
+                        </button>
+                      </div>
+
+                      {/* Image Thumbnail & Details */}
+                      <div className="flex gap-3.5 items-start">
+                        <div className="w-20 h-20 rounded-lg overflow-hidden bg-neutral-100 border border-neutral-200/70 shrink-0">
+                          <img
+                            src={item.image}
+                            alt={item.name}
+                            className="w-full h-full object-cover object-center"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = PRESET_STUDIO_IMAGES[0].url;
+                            }}
+                          />
+                        </div>
+
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-serif text-base font-medium text-neutral-950 leading-snug line-clamp-2">
+                            {item.name}
+                          </h3>
+                          <p className="mt-1 text-sm font-semibold text-neutral-900 tabular-nums">
+                            {item.price !== null ? `₹${item.price.toLocaleString('en-IN')}` : 'Price on request'}
+                          </p>
+                          {item.description && (
+                            <p className="mt-1 text-xs text-neutral-500 line-clamp-2">
+                              {item.description}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Actions Row */}
+                    <div className="mt-4 pt-3 border-t border-neutral-100 flex items-center justify-between gap-2">
                       <button
-                        onClick={() => handleToggleAvailability(item)}
-                        className={`text-xs px-2.5 py-1 rounded-full font-medium transition-colors cursor-pointer flex items-center gap-1 ${
-                          item.available 
-                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/80 hover:bg-emerald-100' 
-                            : 'bg-neutral-200/80 text-neutral-600 hover:bg-neutral-300'
-                        }`}
-                        title="Click to toggle availability"
+                        onClick={() => setEditingProduct(item)}
+                        className="px-3 py-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer"
                       >
-                        <span className={`w-1.5 h-1.5 rounded-full ${item.available ? 'bg-emerald-500' : 'bg-neutral-400'}`} />
-                        <span>{item.available ? 'In Stock' : 'Out of Stock'}</span>
+                        <Edit3 className="w-3.5 h-3.5 text-neutral-600" />
+                        <span>Edit Details</span>
+                      </button>
+
+                      <button
+                        onClick={() => setDeleteConfirmProduct(item)}
+                        className="px-2.5 py-1.5 text-red-600 hover:bg-red-50 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition-colors cursor-pointer"
+                        title="Delete permanently"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Delete</span>
                       </button>
                     </div>
-
-                    {/* Image Thumbnail & Details */}
-                    <div className="flex gap-3.5 items-start">
-                      <div className="w-20 h-20 rounded-lg overflow-hidden bg-neutral-100 border border-neutral-200/70 shrink-0">
-                        <img
-                          src={item.image}
-                          alt={item.name}
-                          className="w-full h-full object-cover object-center"
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).src = PRESET_STUDIO_IMAGES[0].url;
-                          }}
-                        />
-                      </div>
-
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-serif text-base font-medium text-neutral-950 leading-snug line-clamp-2">
-                          {item.name}
-                        </h3>
-                        <p className="mt-1 text-sm font-semibold text-neutral-900 tabular-nums">
-                          {item.price !== null ? `₹${item.price.toLocaleString('en-IN')}` : 'Price on request'}
-                        </p>
-                        {item.description && (
-                          <p className="mt-1 text-xs text-neutral-500 line-clamp-2">
-                            {item.description}
-                          </p>
-                        )}
-                      </div>
-                    </div>
                   </div>
-
-                  {/* Actions Row */}
-                  <div className="mt-4 pt-3 border-t border-neutral-100 flex items-center justify-between gap-2">
-                    <button
-                      onClick={() => setEditingProduct(item)}
-                      className="px-3 py-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer"
-                    >
-                      <Edit3 className="w-3.5 h-3.5 text-neutral-600" />
-                      <span>Edit Details</span>
-                    </button>
-
-                    <button
-                      onClick={() => setDeleteConfirmProduct(item)}
-                      className="px-2.5 py-1.5 text-red-600 hover:bg-red-50 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition-colors cursor-pointer"
-                      title="Delete permanently"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>Delete</span>
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -1629,31 +1618,11 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
                       Server-side only (Secret)
                     </span>
                   </div>
-                  <div className="flex gap-2">
-                    <div className="relative flex-1">
-                      <input
-                        type={showSecretInSetup ? 'text' : 'password'}
-                        readOnly
-                        value="Txp59TP7lxIfBxWYV550A91odbM"
-                        className="w-full px-3.5 py-2.5 bg-neutral-50 border border-neutral-200 rounded-xl text-xs sm:text-sm font-mono text-neutral-900 font-semibold focus:outline-none pr-10"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowSecretInSetup(!showSecretInSetup)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-700 cursor-pointer p-1"
-                        title={showSecretInSetup ? 'Hide secret' : 'Show secret'}
-                      >
-                        {showSecretInSetup ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => copyText('Txp59TP7lxIfBxWYV550A91odbM', 'CLOUDINARY_API_SECRET')}
-                      className="px-3.5 py-2.5 bg-neutral-900 hover:bg-neutral-800 text-white rounded-xl text-xs font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
-                    >
-                      {copiedField === 'CLOUDINARY_API_SECRET' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                      <span>{copiedField === 'CLOUDINARY_API_SECRET' ? 'Copied' : 'Copy'}</span>
-                    </button>
+                  <div className="p-3 bg-neutral-50 border border-neutral-200 rounded-xl text-xs text-neutral-600">
+                    <p className="font-mono text-neutral-800 font-semibold mb-1">••••••••••••••••••••••••••••</p>
+                    <p className="text-[11px] text-neutral-500">
+                      Found in your Cloudinary Dashboard under <em>Product Environment Credentials &gt; API Secret</em>. Add it securely to your Vercel Project Settings &gt; Environment Variables.
+                    </p>
                   </div>
                   <div className="mt-2 text-[11px] text-neutral-500 leading-relaxed bg-neutral-50 p-2.5 rounded-lg border border-neutral-200">
                     🔒 <strong>Strict Server-Side Protection:</strong> This API secret is kept exclusively on your Vercel serverless functions in <code className="font-mono">api/admin/cloudinary-sign.ts</code>. It is never exposed in browser JavaScript, client network requests, or public Git repositories.
@@ -1787,7 +1756,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
                     <div className="bg-neutral-950 text-neutral-200 p-3 rounded-lg font-mono text-[11px] space-y-1.5 overflow-x-auto">
                       <div><span className="text-emerald-400">CLOUDINARY_CLOUD_NAME</span>="tis87kjf"</div>
                       <div><span className="text-emerald-400">CLOUDINARY_API_KEY</span>="425216243798441"</div>
-                      <div><span className="text-emerald-400">CLOUDINARY_API_SECRET</span>="Txp59TP7lxIfBxWYV550A91odbM"</div>
+                      <div><span className="text-emerald-400">CLOUDINARY_API_SECRET</span>="your_api_secret_from_cloudinary"</div>
                     </div>
                   </div>
                 </div>
