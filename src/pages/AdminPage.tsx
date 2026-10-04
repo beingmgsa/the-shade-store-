@@ -140,6 +140,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
   const [formPrice, setFormPrice] = useState<string>('');
   const [formImage, setFormImage] = useState(PRESET_STUDIO_IMAGES[0].url);
   const [formCustomImage, setFormCustomImage] = useState('');
+  const [formGalleryImages, setFormGalleryImages] = useState<string[]>([]);
   const [formItemCode, setFormItemCode] = useState('');
   const [formDescription, setFormDescription] = useState('');
   const [formAvailable, setFormAvailable] = useState(true);
@@ -215,19 +216,19 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
   };
 
   // Upload image to Cloudinary using signed signature and in-browser compression
-  const uploadToCloudinary = async (file: File): Promise<string | null> => {
+  const uploadToCloudinary = async (file: File, showSuccessToast: boolean = true): Promise<string | null> => {
     if (!currentUser || !isOwner) {
       showToast('Admin authentication required', 'error');
       return null;
     }
 
     if (!file.type.startsWith('image/')) {
-      showToast('Please select a valid image file (JPG, PNG, WEBP)', 'error');
+      showToast(`"${file.name}" is not a valid image (JPG, PNG, WEBP)`, 'error');
       return null;
     }
 
     if (file.size > 25 * 1024 * 1024) {
-      showToast('Original image file size must be less than 25MB', 'error');
+      showToast(`Image "${file.name}" exceeds 25MB limit`, 'error');
       return null;
     }
 
@@ -235,7 +236,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
 
     try {
       // Step 1: Optimize and compress smartphone photos in browser to speed up network upload by 5x-10x
-      setUploadProgress('Optimizing photo for web (preserving glasses clarity)...');
+      setUploadProgress(`Optimizing ${file.name} for web...`);
       const optimizedFile = await compressProductImage(file, {
         maxWidth: 1600,
         maxHeight: 1600,
@@ -267,7 +268,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
       }
 
       // Step 3: Perform upload with real progress tracking using XMLHttpRequest
-      setUploadProgress('Uploading photo to Cloudinary CDN (0%)...');
+      setUploadProgress(`Uploading ${file.name} to Cloudinary...`);
 
       const formData = new FormData();
       formData.append('file', optimizedFile);
@@ -285,7 +286,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
         xhr.upload.onprogress = (event) => {
           if (event.lengthComputable) {
             const percent = Math.round((event.loaded / event.total) * 100);
-            setUploadProgress(`Uploading to Cloudinary CDN (${percent}%)...`);
+            setUploadProgress(`Uploading ${file.name} (${percent}%)...`);
           }
         };
 
@@ -313,7 +314,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
         throw new Error('Cloudinary response did not return a valid permanent image URL');
       }
 
-      showToast('Photo uploaded to Cloudinary CDN successfully!');
+      if (showSuccessToast) {
+        showToast('Photo uploaded to Cloudinary CDN successfully!');
+      }
       return uploadResult.secure_url;
     } catch (err: any) {
       console.error('Image upload failed:', err);
@@ -323,6 +326,34 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
       setIsUploadingImage(false);
       setUploadProgress(null);
     }
+  };
+
+  // Upload multiple images sequentially with progress counter
+  const uploadMultipleToCloudinary = async (files: FileList | File[]): Promise<string[]> => {
+    const fileArray = Array.from(files);
+    if (fileArray.length === 0) return [];
+
+    setIsUploadingImage(true);
+    const uploadedUrls: string[] = [];
+
+    try {
+      for (let i = 0; i < fileArray.length; i++) {
+        const f = fileArray[i];
+        setUploadProgress(`Uploading photo ${i + 1} of ${fileArray.length} (${f.name})...`);
+        const url = await uploadToCloudinary(f, false);
+        if (url) {
+          uploadedUrls.push(url);
+        }
+      }
+      if (uploadedUrls.length > 0) {
+        showToast(`${uploadedUrls.length} photo${uploadedUrls.length > 1 ? 's' : ''} uploaded to Cloudinary CDN!`);
+      }
+    } finally {
+      setIsUploadingImage(false);
+      setUploadProgress(null);
+    }
+
+    return uploadedUrls;
   };
 
   // Fetch products from Firebase Firestore (with API & static fallback)
@@ -529,11 +560,24 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
     try {
       const token = await currentUser.getIdToken();
       const id = `frame-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
+      
+      // Collect gallery: custom uploaded images + imageToUse
+      const galleryList: string[] = [];
+      if (imageToUse && !galleryList.includes(imageToUse)) {
+        galleryList.push(imageToUse);
+      }
+      formGalleryImages.forEach(img => {
+        if (img && !galleryList.includes(img)) {
+          galleryList.push(img);
+        }
+      });
+
       const newProduct: GlassesProduct = {
         id,
         name: trimmedName,
         price: formPrice ? Number(formPrice) : null,
         image: imageToUse,
+        images: galleryList.length > 0 ? galleryList : [imageToUse],
         itemCode: formItemCode.trim() || undefined,
         description: formDescription.trim(),
         available: formAvailable,
@@ -557,6 +601,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
       setFormName('');
       setFormPrice('');
       setFormCustomImage('');
+      setFormGalleryImages([]);
       setFormItemCode('');
       setFormDescription('');
       setFormAvailable(true);
@@ -595,6 +640,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
           ? Number(editingProduct.price) 
           : null,
         image: editingProduct.image.trim(),
+        images: Array.isArray(editingProduct.images) && editingProduct.images.length > 0 
+          ? editingProduct.images 
+          : [editingProduct.image.trim()],
         itemCode: editingProduct.itemCode?.trim() || undefined,
         description: editingProduct.description?.trim() || '',
         available: editingProduct.available !== false,
@@ -1237,7 +1285,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
                   )}
                 </div>
 
-                {/* Cloudinary Signed Direct Upload Area */}
+                {/* Cloudinary Signed Direct Upload Area with Multi-Select */}
                 <div className="p-3.5 bg-neutral-50 rounded-xl border border-dashed border-neutral-300 hover:border-neutral-400 transition-colors mb-3">
                   <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
@@ -1246,10 +1294,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
                       </div>
                       <div className="text-left">
                         <p className="text-xs font-semibold text-neutral-900">
-                          Upload Photo via Cloudinary (Signed)
+                          Upload Photos via Cloudinary (Multi-Select Supported)
                         </p>
                         <p className="text-[11px] text-neutral-500">
-                          Secure server-signed upload directly to CDN (PNG, JPG, WEBP)
+                          Choose one or multiple photos from your gallery at once (JPG, PNG, WEBP)
                         </p>
                       </div>
                     </div>
@@ -1258,19 +1306,31 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
                       isUploadingImage ? 'opacity-50 pointer-events-none' : ''
                     }`}>
                       <Upload className="w-3.5 h-3.5" />
-                      <span>{isUploadingImage ? 'Uploading...' : 'Choose Photo'}</span>
+                      <span>{isUploadingImage ? 'Uploading Photos...' : 'Choose Photos (Multi)'}</span>
                       <input
                         type="file"
                         accept="image/*"
+                        multiple
                         className="hidden"
                         disabled={isUploadingImage}
                         onChange={async (e) => {
-                          const file = e.target.files?.[0];
-                          if (file) {
-                            const url = await uploadToCloudinary(file);
-                            if (url) {
-                              setFormCustomImage(url);
-                              setFormImage(url);
+                          const files = e.target.files;
+                          if (files && files.length > 0) {
+                            const urls = await uploadMultipleToCloudinary(files);
+                            if (urls.length > 0) {
+                              // If no primary image set yet, set first as primary
+                              if (!formCustomImage) {
+                                setFormCustomImage(urls[0]);
+                                setFormImage(urls[0]);
+                              }
+                              // Append to gallery
+                              setFormGalleryImages((prev) => {
+                                const combined = [...prev];
+                                urls.forEach(u => {
+                                  if (!combined.includes(u)) combined.push(u);
+                                });
+                                return combined;
+                              });
                             }
                           }
                         }}
@@ -1285,19 +1345,71 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
                     </div>
                   )}
 
-                  {/* Active Upload Preview */}
-                  {formCustomImage && (
-                    <div className="mt-3 pt-2.5 border-t border-neutral-200/60 flex items-center gap-3">
-                      <div className="w-12 h-12 rounded-lg overflow-hidden border border-neutral-200 shrink-0 bg-neutral-100">
-                        <img src={formCustomImage} alt="Uploaded frame" className="w-full h-full object-cover" />
+                  {/* Multi-Photo Gallery Preview & Selector */}
+                  {(formCustomImage || formGalleryImages.length > 0) && (
+                    <div className="mt-3 pt-2.5 border-t border-neutral-200/60 space-y-2">
+                      <div className="flex items-center justify-between text-xs font-semibold text-neutral-800">
+                        <span>Selected Photos ({formGalleryImages.length > 0 ? formGalleryImages.length : 1}):</span>
+                        <span className="text-[11px] text-neutral-400 font-normal">Click thumbnail to set as primary display image</span>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">
-                          <Check className="w-2.5 h-2.5" /> Selected Photo
-                        </span>
-                        <p className="text-[11px] font-mono text-neutral-600 truncate mt-0.5">
-                          {formCustomImage}
-                        </p>
+
+                      <div className="flex flex-wrap gap-2.5">
+                        {formGalleryImages.map((imgUrl, idx) => {
+                          const isPrimary = (formCustomImage || formImage) === imgUrl;
+                          return (
+                            <div 
+                              key={idx}
+                              onClick={() => {
+                                setFormCustomImage(imgUrl);
+                                setFormImage(imgUrl);
+                              }}
+                              className={`relative group w-18 h-18 rounded-xl overflow-hidden border-2 cursor-pointer transition-all ${
+                                isPrimary 
+                                  ? 'border-neutral-950 ring-2 ring-neutral-900/20 scale-102' 
+                                  : 'border-neutral-200 hover:border-neutral-400 opacity-80 hover:opacity-100'
+                              }`}
+                            >
+                              <img src={imgUrl} alt={`Photo ${idx + 1}`} className="w-full h-full object-cover" />
+                              
+                              {/* Primary Badge */}
+                              {isPrimary && (
+                                <span className="absolute top-1 left-1 bg-black/80 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow-xs">
+                                  Primary
+                                </span>
+                              )}
+
+                              {/* Remove photo button */}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setFormGalleryImages(prev => prev.filter(u => u !== imgUrl));
+                                  if (formCustomImage === imgUrl) {
+                                    const remaining = formGalleryImages.filter(u => u !== imgUrl);
+                                    setFormCustomImage(remaining[0] || '');
+                                    setFormImage(remaining[0] || PRESET_STUDIO_IMAGES[0].url);
+                                  }
+                                }}
+                                className="absolute top-1 right-1 w-5 h-5 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-xs"
+                                title="Remove photo"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          );
+                        })}
+
+                        {/* If single image without gallery list */}
+                        {formCustomImage && !formGalleryImages.includes(formCustomImage) && (
+                          <div 
+                            className="relative w-18 h-18 rounded-xl overflow-hidden border-2 border-neutral-950 ring-2 ring-neutral-900/20"
+                          >
+                            <img src={formCustomImage} alt="Uploaded frame" className="w-full h-full object-cover" />
+                            <span className="absolute top-1 left-1 bg-black/80 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow-xs">
+                              Primary
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
@@ -1930,42 +2042,40 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="text-xs font-semibold text-neutral-800">
-                    Photo URL
+                    Product Photos (Gallery)
                   </label>
-                  <label className={`text-[11px] px-2.5 py-1 bg-neutral-900 hover:bg-neutral-800 text-white rounded-md font-medium inline-flex items-center gap-1 cursor-pointer transition-colors ${
+                  <label className={`text-[11px] px-2.5 py-1 bg-neutral-900 hover:bg-neutral-850 text-white rounded-md font-medium inline-flex items-center gap-1 cursor-pointer transition-colors ${
                     isUploadingImage ? 'opacity-50 pointer-events-none' : ''
                   }`}>
                     <Upload className="w-3 h-3" />
-                    <span>{isUploadingImage ? 'Uploading...' : 'Upload New to Cloudinary'}</span>
+                    <span>{isUploadingImage ? 'Uploading...' : 'Add More Photos (Multi)'}</span>
                     <input
                       type="file"
                       accept="image/*"
+                      multiple
                       className="hidden"
                       disabled={isUploadingImage}
                       onChange={async (e) => {
-                        const file = e.target.files?.[0];
-                        if (file) {
-                          const url = await uploadToCloudinary(file);
-                          if (url) {
-                            setEditingProduct({ ...editingProduct, image: url });
+                        const files = e.target.files;
+                        if (files && files.length > 0) {
+                          const urls = await uploadMultipleToCloudinary(files);
+                          if (urls.length > 0) {
+                            const existingList = Array.isArray(editingProduct.images) && editingProduct.images.length > 0
+                              ? [...editingProduct.images]
+                              : [editingProduct.image];
+                            urls.forEach(u => {
+                              if (!existingList.includes(u)) existingList.push(u);
+                            });
+                            setEditingProduct({
+                              ...editingProduct,
+                              image: editingProduct.image || urls[0],
+                              images: existingList,
+                            });
                           }
                         }
                       }}
                     />
                   </label>
-                </div>
-
-                <div className="flex gap-2 items-center mb-2">
-                  <div className="w-12 h-12 rounded-lg overflow-hidden border border-neutral-200 shrink-0 bg-neutral-100">
-                    <img src={editingProduct.image} alt={editingProduct.name} className="w-full h-full object-cover" />
-                  </div>
-                  <input
-                    type="text"
-                    value={editingProduct.image}
-                    onChange={(e) => setEditingProduct({ ...editingProduct, image: e.target.value })}
-                    className="w-full px-3.5 py-2.5 bg-white border border-neutral-300 rounded-xl text-xs font-mono"
-                    required
-                  />
                 </div>
 
                 {uploadProgress && (
@@ -1974,6 +2084,74 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onBackToStore }) => {
                     <span>{uploadProgress}</span>
                   </div>
                 )}
+
+                {/* Edit Modal Gallery Thumbnails */}
+                {(() => {
+                  const gallery = Array.isArray(editingProduct.images) && editingProduct.images.length > 0
+                    ? editingProduct.images
+                    : [editingProduct.image];
+
+                  return (
+                    <div className="space-y-1.5 mb-2">
+                      <div className="flex flex-wrap gap-2">
+                        {gallery.map((imgUrl, idx) => {
+                          const isPrimary = editingProduct.image === imgUrl;
+                          return (
+                            <div
+                              key={idx}
+                              onClick={() => setEditingProduct({ ...editingProduct, image: imgUrl })}
+                              className={`relative group w-16 h-16 rounded-lg overflow-hidden border-2 cursor-pointer transition-all ${
+                                isPrimary
+                                  ? 'border-neutral-950 ring-2 ring-neutral-900/20 scale-102'
+                                  : 'border-neutral-200 hover:border-neutral-400 opacity-80 hover:opacity-100'
+                              }`}
+                            >
+                              <img src={imgUrl} alt={`Frame view ${idx + 1}`} className="w-full h-full object-cover" />
+                              {isPrimary && (
+                                <span className="absolute top-0.5 left-0.5 bg-black/80 text-white text-[8px] font-bold px-1 py-0.2 rounded shadow-xs">
+                                  Primary
+                                </span>
+                              )}
+                              {gallery.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const filtered = gallery.filter(u => u !== imgUrl);
+                                    setEditingProduct({
+                                      ...editingProduct,
+                                      image: isPrimary ? (filtered[0] || '') : editingProduct.image,
+                                      images: filtered,
+                                    });
+                                  }}
+                                  className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-red-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                                  title="Remove view"
+                                >
+                                  <X className="w-2.5 h-2.5" />
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <span className="text-[10px] text-neutral-400 block">Click a photo above to set as primary display image</span>
+                    </div>
+                  );
+                })()}
+
+                <div className="flex gap-2 items-center mb-2">
+                  <div className="w-10 h-10 rounded-lg overflow-hidden border border-neutral-200 shrink-0 bg-neutral-100">
+                    <img src={editingProduct.image} alt={editingProduct.name} className="w-full h-full object-cover" />
+                  </div>
+                  <input
+                    type="text"
+                    value={editingProduct.image}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, image: e.target.value })}
+                    className="w-full px-3 py-2 bg-white border border-neutral-300 rounded-xl text-xs font-mono"
+                    placeholder="Primary photo URL"
+                    required
+                  />
+                </div>
 
                 {/* Photo Presets for quick selection */}
                 <div className="flex gap-1.5 overflow-x-auto py-1">

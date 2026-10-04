@@ -31,10 +31,30 @@ export const ProductDetailsModal: React.FC<ProductDetailsModalProps> = ({
 }) => {
   const [copied, setCopied] = useState(false);
   const [imgError, setImgError] = useState(false);
+  const [activeImageIndex, setActiveImageIndex] = useState(0);
+
+  const allImages = React.useMemo(() => {
+    if (!item) return [];
+    const list: string[] = [];
+    if (Array.isArray(item.images) && item.images.length > 0) {
+      item.images.forEach(img => {
+        if (img && typeof img === 'string' && !list.includes(img.trim())) {
+          list.push(img.trim());
+        }
+      });
+    }
+    if (item.image && typeof item.image === 'string' && !list.includes(item.image.trim())) {
+      list.unshift(item.image.trim());
+    }
+    return list;
+  }, [item?.id, item?.image, item?.images]);
 
   useEffect(() => {
     setImgError(false);
+    setActiveImageIndex(0);
   }, [item?.id, item?.image]);
+
+  const currentDisplayImage = allImages[activeImageIndex] || item?.image || '';
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -121,10 +141,10 @@ export const ProductDetailsModal: React.FC<ProductDetailsModalProps> = ({
         <div className="p-4 sm:p-6 space-y-6">
           {/* Main Visual & Key Data */}
           <div className="grid grid-cols-1 sm:grid-cols-12 gap-5 items-start">
-            {/* Large Image Showcase */}
-            <div className="sm:col-span-6 w-full">
+            {/* Large Image Showcase & Gallery */}
+            <div className="sm:col-span-6 w-full space-y-2.5">
               <div className="relative aspect-[4/3] rounded-xl overflow-hidden bg-[#F5F4F0] border border-neutral-200/80 shadow-2xs">
-                {imgError || !item.image || !item.image.trim() ? (
+                {imgError || !currentDisplayImage ? (
                   <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center text-neutral-400 bg-neutral-100">
                     <div className="w-12 h-12 rounded-full bg-neutral-200/80 flex items-center justify-center mb-2 text-neutral-500">
                       <ImageOff className="w-6 h-6" />
@@ -136,9 +156,9 @@ export const ProductDetailsModal: React.FC<ProductDetailsModalProps> = ({
                   </div>
                 ) : (
                   <img
-                    src={item.image}
-                    alt={item.name}
-                    className="w-full h-full object-cover object-center"
+                    src={currentDisplayImage}
+                    alt={`${item.name} view ${activeImageIndex + 1}`}
+                    className="w-full h-full object-cover object-center transition-all duration-200"
                     onError={() => setImgError(true)}
                   />
                 )}
@@ -147,8 +167,37 @@ export const ProductDetailsModal: React.FC<ProductDetailsModalProps> = ({
                     {item.itemCode}
                   </div>
                 )}
+                {allImages.length > 1 && (
+                  <div className="absolute bottom-2.5 right-2.5 bg-black/75 backdrop-blur-xs text-white px-2 py-0.5 rounded text-[10px] font-medium tracking-wide">
+                    {activeImageIndex + 1} / {allImages.length}
+                  </div>
+                )}
               </div>
-              <p className="mt-1.5 text-center text-[11px] text-neutral-400">
+
+              {/* Multi-Photo Thumbnails */}
+              {allImages.length > 1 && (
+                <div className="flex items-center gap-2 overflow-x-auto py-1 scrollbar-none">
+                  {allImages.map((imgUrl, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => {
+                        setActiveImageIndex(idx);
+                        setImgError(false);
+                      }}
+                      className={`relative w-14 h-14 rounded-lg overflow-hidden border-2 transition-all p-0.5 shrink-0 cursor-pointer ${
+                        activeImageIndex === idx
+                          ? 'border-neutral-900 ring-2 ring-neutral-900/10 scale-102'
+                          : 'border-neutral-200 hover:border-neutral-400 opacity-70 hover:opacity-100'
+                      }`}
+                    >
+                      <img src={imgUrl} alt={`Thumbnail ${idx + 1}`} className="w-full h-full object-cover rounded" />
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <p className="text-center text-[11px] text-neutral-400">
                 In-store studio photography · Pur Road, Bhilwara
               </p>
             </div>

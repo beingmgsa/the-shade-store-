@@ -15,7 +15,8 @@ export interface GlassesProduct {
   id: string;
   name: string;
   price: number | null;
-  image: string; // Uniform image field across Firebase and frontend
+  image: string; // Uniform primary image field across Firebase and frontend
+  images?: string[]; // Multiple photos gallery
   itemCode?: string;
   description?: string;
   available: boolean;
@@ -39,6 +40,16 @@ export function normalizeProductDoc(id: string, data: any): GlassesProduct {
   if (!img && typeof data.imageUrl === 'string' && data.imageUrl.trim()) {
     img = data.imageUrl.trim();
   }
+
+  // Handle images array
+  let gallery: string[] = [];
+  if (Array.isArray(data.images) && data.images.length > 0) {
+    gallery = data.images.filter((x: any) => typeof x === 'string' && x.trim().length > 0);
+  }
+
+  if (!img && gallery.length > 0) {
+    img = gallery[0];
+  }
   if (!img) {
     img = '/images/glasses_tortoise_acetate_1790681743897.jpg';
   }
@@ -48,6 +59,7 @@ export function normalizeProductDoc(id: string, data: any): GlassesProduct {
     name: data.name || 'Eyewear Frame',
     price: data.price !== undefined && data.price !== null && data.price !== '' ? Number(data.price) : null,
     image: img,
+    images: gallery.length > 0 ? gallery : (img ? [img] : []),
     itemCode: data.itemCode || undefined,
     description: data.description || '',
     available: data.available !== false,
@@ -133,40 +145,65 @@ export async function saveProductToFirebase(product: GlassesProduct, authToken?:
   let firestoreSuccess = false;
   let firestoreError: string | undefined;
 
+  const docData: any = {
+    id: product.id,
+    name: product.name,
+    price: product.price,
+    image: product.image, // Uniform primary image
+    images: Array.isArray(product.images) && product.images.length > 0 ? product.images : [product.image],
+    itemCode: product.itemCode || '',
+    description: product.description || '',
+    available: product.available !== false,
+    createdAt: product.createdAt,
+    updatedAt: product.updatedAt,
+  };
+
+  // Helper with 10s timeout so network hangs never freeze the publisher
+  const withTimeout = <T>(promise: Promise<T>, ms: number, errorMsg: string): Promise<T> => {
+    return Promise.race([
+      promise,
+      new Promise<T>((_, reject) => setTimeout(() => reject(new Error(errorMsg)), ms))
+    ]);
+  };
+
   // 1. Write to Firestore directly via Firebase Web SDK
   try {
     const docRef = doc(db, 'products', product.id);
-    await setDoc(docRef, {
-      id: product.id,
-      name: product.name,
-      price: product.price,
-      image: product.image, // Exact field name
-      itemCode: product.itemCode || '',
-      description: product.description || '',
-      available: product.available !== false,
-      createdAt: product.createdAt,
-      updatedAt: product.updatedAt,
-    }, { merge: true });
+    await withTimeout(
+      setDoc(docRef, docData, { merge: true }),
+      8000,
+      'Firestore write timed out after 8s'
+    );
     firestoreSuccess = true;
   } catch (err: any) {
-    console.warn('Firestore direct write error:', err);
+    console.warn('Firestore direct write notice:', err);
     firestoreError = err?.message || String(err);
   }
 
-  // 2. Also sync to backend API as fallback cache
-  try {
-    if (authToken) {
-      await fetch('/api/admin/products', {
+  // 2. Also sync to backend API as fallback cache (non-blocking)
+  if (authToken) {
+    try {
+      const apiPromise = fetch('/api/admin/products', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${authToken}`,
         },
-        body: JSON.stringify(product),
+        body: JSON.stringify(docData),
       });
+
+      // Give API 5 seconds max, do not wait forever
+      const res = await withTimeout(apiPromise, 5000, 'API sync timed out');
+      if (res.ok) {
+        // If Firestore had a network timeout but API succeeded, consider saved!
+        if (!firestoreSuccess) {
+          firestoreSuccess = true;
+          firestoreError = undefined;
+        }
+      }
+    } catch (apiErr) {
+      console.warn('Backend API sync notice:', apiErr);
     }
-  } catch (apiErr) {
-    console.warn('Backend API sync error:', apiErr);
   }
 
   return { firestoreSuccess, firestoreError };

@@ -27,11 +27,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // POST: Add new frame or upsert
   if (req.method === 'POST') {
-    const { id: incomingId, name, price, image, itemCode, description, available } = req.body || {};
+    const { id: incomingId, name, price, image, images, itemCode, description, available } = req.body || {};
 
     if (!name || typeof name !== 'string' || !name.trim()) {
       return res.status(400).json({ error: 'Product name is required' });
     }
+
+    const normalizedImages = Array.isArray(images) && images.length > 0
+      ? images.map((u: any) => normalizeProductImage(String(u)))
+      : [normalizeProductImage(image)];
 
     // Check if product with this ID already exists -> update it
     if (incomingId && typeof incomingId === 'string') {
@@ -43,6 +47,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           name: name.trim(),
           price: price !== undefined ? (price === null || price === '' ? null : Number(price)) : cur.price,
           image: normalizeProductImage(image) || cur.image,
+          images: normalizedImages.length > 0 ? normalizedImages : cur.images,
           itemCode: itemCode && typeof itemCode === 'string' && itemCode.trim() ? itemCode.trim() : cur.itemCode,
           description: description && typeof description === 'string' ? description.trim() : cur.description,
           available: available !== undefined ? Boolean(available) : cur.available,
@@ -63,6 +68,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       name: name.trim(),
       price: price !== undefined && price !== null && price !== '' ? Number(price) : null,
       image: normalizeProductImage(image),
+      images: normalizedImages,
       itemCode: itemCode && typeof itemCode === 'string' && itemCode.trim() ? itemCode.trim() : `TSS-${String(products.length + 1).padStart(2, '0')}`,
       description: description && typeof description === 'string' ? description.trim() : '',
       available: available !== undefined ? Boolean(available) : true,

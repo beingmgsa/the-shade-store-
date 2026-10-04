@@ -62,6 +62,7 @@ export interface GlassesProduct {
   name: string;
   price: number | null;
   image: string;
+  images?: string[];
   itemCode?: string;
   description?: string;
   available: boolean;
@@ -376,7 +377,7 @@ app.post('/api/admin/cloudinary-sign', requireOwnerAuth, (_req: Request, res: Re
 // 6. Admin Products: Add or Upsert
 app.post('/api/admin/products', requireOwnerAuth, (req: Request, res: Response) => {
   res.setHeader('Cache-Control', 'no-store');
-  const { id: incomingId, name, price, image, itemCode, description, available } = req.body;
+  const { id: incomingId, name, price, image, images, itemCode, description, available } = req.body;
 
   if (!name || typeof name !== 'string' || !name.trim()) {
     res.status(400).json({ error: 'Product name is required.' });
@@ -384,6 +385,9 @@ app.post('/api/admin/products', requireOwnerAuth, (req: Request, res: Response) 
   }
 
   const normalizedImage = normalizeProductImage(image);
+  const normalizedImages: string[] = Array.isArray(images) && images.length > 0 
+    ? images.map((u: any) => normalizeProductImage(String(u))) 
+    : [normalizedImage];
   const products = getProducts();
 
   // If an ID is provided and exists in the list, update it (upsert)
@@ -396,6 +400,7 @@ app.post('/api/admin/products', requireOwnerAuth, (req: Request, res: Response) 
         name: name.trim(),
         price: price !== undefined ? (price === null || price === '' ? null : Number(price)) : current.price,
         image: normalizedImage || current.image,
+        images: normalizedImages.length > 0 ? normalizedImages : current.images,
         itemCode: itemCode !== undefined && typeof itemCode === 'string' && itemCode.trim() ? itemCode.trim() : current.itemCode,
         description: description !== undefined && typeof description === 'string' ? description.trim() : current.description,
         available: available !== undefined ? Boolean(available) : current.available,
@@ -422,6 +427,7 @@ app.post('/api/admin/products', requireOwnerAuth, (req: Request, res: Response) 
     name: name.trim(),
     price: price !== undefined && price !== null && price !== '' ? Number(price) : null,
     image: normalizedImage,
+    images: normalizedImages,
     itemCode: itemCode && typeof itemCode === 'string' && itemCode.trim() ? itemCode.trim() : `TSS-${String(products.length + 1).padStart(2, '0')}`,
     description: description && typeof description === 'string' ? description.trim() : '',
     available: available !== undefined ? Boolean(available) : true,

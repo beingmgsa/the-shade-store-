@@ -6,6 +6,7 @@ export interface GlassesProduct {
   name: string;
   price: number | null;
   image: string;
+  images?: string[];
   itemCode?: string;
   description?: string;
   available: boolean;

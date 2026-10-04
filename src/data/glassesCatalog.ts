@@ -20,7 +20,8 @@ export interface GlassesItem {
   id: string;
   name: string;
   price: number | null; // Price in INR (₹) or null if unlisted
-  image: string;
+  image: string; // Primary image
+  images?: string[]; // Multiple photos gallery
   itemCode?: string; // Optional tag or model code for customer reference
   description?: string; // Specifications, fit, and frame details
   available?: boolean;
